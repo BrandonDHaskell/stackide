@@ -7,14 +7,14 @@ WORKDIR /tmp
 RUN wget -q https://sourceware.org/pub/gcc/releases/gcc-16.2.0/gcc-16.2.0.tar.xz \
     && tar xf gcc-16.2.0.tar.xz && mkdir gcc-build && cd gcc-build \
     && ../gcc-16.2.0/configure --prefix=/opt/gcc-16.2 --enable-languages=c,c++ --disable-multilib \
-    --disable-bootstrap && make -j"$(nproc)" && make install
+    && make -j"$(nproc)" && make install
 
 FROM debian:trixie
 ARG LLVM=23.1.1
 ARG CMAKE=4.4.3
 ARG NINJA=1.13.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git xz-utils libgmp10 binutils \
+    ca-certificates curl git xz-utils libgmp10 binutils libatomic1 \
     libmpfr6 libmpc3 libc6-dev && rm -rf /var/lib/apt/lists/*
 COPY --from=gcc-build /opt/gcc-16.2 /opt/gcc-16.2
 RUN set -eux; \
