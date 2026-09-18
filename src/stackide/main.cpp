@@ -1,12 +1,7 @@
 //
 // Created by bhaskell on 9/14/26.
 //
-#include "SDL3/SDL_error.h"
-#include "SDL3/SDL_gpu.h"
-#include "SDL3/SDL_init.h"
-#include "SDL3/SDL_oldnames.h"
-#include "SDL3/SDL_stdinc.h"
-#include "SDL3/SDL_video.h"
+#include <SDL3/SDL.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -18,35 +13,53 @@ namespace {
 constexpr int kWindowWidth = 1280;
 constexpr int kWindowHeight = 800;
 
-bool has_flag(int argc, char* argv[], const std::string_view& flag) {
-  for (int i = 1; i < argc; ++i) {
-    if (flag == argv[i]) return true;
-  }
-  return false;
+bool has_flag(int argc, char** argv, std::string_view flag) {
+    for (int i = 1; i < argc; ++i) {
+        if (flag == argv[i]) return true;
+    }
+    return false;
 }
 
-}// namespace
+} // namespace
 
 int main(int argc, char** argv) {
-  const bool smoke = has_flag(argc, argv, "--smoke");
+    const bool smoke = has_flag(argc, argv, "--smoke");
 
-  if (!SDL_Init(SDL_INIT_VIDEO)) {
-    std::println(stderr, "SDL_Init failed: {}\n", SDL_GetError());
-    return EXIT_FAILURE;
-  }
+    if (smoke) {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    }
 
-  SDL_Window* window = SDL_CreateWindow("stackide", kWindowWidth, kWindowHeight,SDL_WINDOW_RESIZABLE);
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::println(stderr, "SDL_Init failed: {}", SDL_GetError());
+        return EXIT_FAILURE;
+    }
 
-  if (!window) {
-    std::println(stderr, "SDL_CreateWindow failed: {}\n", SDL_GetError());
-    SDL_QUIT();
-    return EXIT_FAILURE;
-  }
+    SDL_Window* window = SDL_CreateWindow("stackide", kWindowWidth, kWindowHeight,
+                                          SDL_WINDOW_RESIZABLE);
+    if (!window) {
+        std::println(stderr, "SDL_CreateWindow failed: {}", SDL_GetError());
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
 
-  if (SDL_ClaimWindowForGPUDevice(gpu, window)) {}
-    std::println(stderr, "SDL_ClaimWindowForGPUDevice failed: {}\n", SDL_GetError());
-    SDL_DestroyGPUDevice(gpu);
-    SDL_DestroyWindow(window);
+    SDL_GPUDevice* gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
+    if (!gpu) {
+        if (smoke) {
+            std::println(stderr, "smoke: no GPU backend available, skipping render path");
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return EXIT_SUCCESS;
+        }
+        std::println(stderr, "SDL_CreateGPUDevice failed: {}", SDL_GetError());
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
+
+    if (!SDL_ClaimWindowForGPUDevice(gpu, window)) {
+        std::println(stderr, "SDL_ClaimWindowForGPUDevice failed: {}", SDL_GetError());
+        SDL_DestroyGPUDevice(gpu);
+        SDL_DestroyWindow(window);
         SDL_Quit();
         return EXIT_FAILURE;
     }
@@ -60,7 +73,7 @@ int main(int argc, char** argv) {
 
     while (running) {
         SDL_Event event;
-    while (SDL_PollEvent(&event)) {
+        while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) running = false;
             if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
                 running = false;
