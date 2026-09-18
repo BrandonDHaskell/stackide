@@ -11,3 +11,4 @@ target_include_directories(stackide PRIVATE include)
 
 enable_testing()
 add_test(NAME runs COMMAND stackide)
+add_test(NAME runs COMMAND stackide --smoke)
