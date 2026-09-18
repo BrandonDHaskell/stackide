@@ -22,4 +22,4 @@ jobs:
           push: true
           platforms: linux/amd64
           provenance: false
-          tags: ${{ steps.img.outputs.name }}:latest
+          tags: ghcr.io/brandondhaskell/stackide-toolchain:latest

@@ -10,6 +10,8 @@ jobs:
         preset: [gcc, clang]
     steps:
       - uses: actions/checkout@v5
+      - id: img
+      - run: echo "name=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/stackide-toolchain" >> "$GITHUB_OUTPUT"
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
       - run: ctest --preset ${{ matrix.preset }}
