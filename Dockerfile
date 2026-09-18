@@ -14,8 +14,10 @@ ARG LLVM=23.1.1
 ARG CMAKE=4.4.3
 ARG NINJA=1.13.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git xz-utils libgmp10 binutils libatomic1 \
-    libmpfr6 libmpc3 libc6-dev && rm -rf /var/lib/apt/lists/*
+          ca-certificates curl git xz-utils binutils libc6-dev libatomic1 \
+          pkg-config gdb \
+          libgmp10 libmpfr6 libmpc3 \
+        && rm -rf /var/lib/apt/lists/*
 COPY --from=gcc-build /opt/gcc-16.2 /opt/gcc-16.2
 RUN set -eux; \
     curl -fsSL -o /tmp/llvm.tar.xz \
