@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [gcc, clang]
+        preset: [ci-gcc, ci-clang]
     steps:
       - uses: actions/checkout@v5
       - run: cmake --preset ${{ matrix.preset }}

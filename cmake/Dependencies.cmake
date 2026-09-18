@@ -1,0 +1,27 @@
+include(FetchContent)
+
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON  CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+
+if(STACKIDE_HEADLESS)
+    set(SDL_X11     OFF CACHE BOOL "" FORCE)
+    set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
+    set(SDL_DUMMY   ON  CACHE BOOL "" FORCE)
+endif()
+
+FetchContent_Declare(SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG        release-3.4.16
+        GIT_SHALLOW    TRUE
+)
+
+set(SDL_AUDIO    OFF CACHE BOOL "" FORCE)
+set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
+set(SDL_HAPTIC   OFF CACHE BOOL "" FORCE)
+set(SDL_SENSOR   OFF CACHE BOOL "" FORCE)
+set(SDL_CAMERA   OFF CACHE BOOL "" FORCE)
+set(SDL_POWER    OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(SDL3)
+

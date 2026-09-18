@@ -34,14 +34,28 @@
         "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++ -rtlib=compiler-rt --unwindlib=libunwind -Wl,-rpath,/opt/llvm/lib/x86_64-unknown-linux-gnu",
         "CMAKE_SHARED_LINKER_FLAGS": "-stdlib=libc++ -rtlib=compiler-rt --unwindlib=libunwind -Wl,-rpath,/opt/llvm/lib/x86_64-unknown-linux-gnu"
       }
+    },
+    {
+      "name": "ci-gcc",
+      "inherits": "gcc",
+      "cacheVariables": { "STACKIDE_HEADLESS": "ON" }
+    },
+    {
+      "name": "ci-clang",
+      "inherits": "clang",
+      "cacheVariables": { "STACKIDE_HEADLESS": "ON" }
     }
   ],
   "buildPresets": [
     { "name": "gcc", "configurePreset": "gcc" },
-    { "name": "clang", "configurePreset": "clang" }
+    { "name": "clang", "configurePreset": "clang" },
+    { "name": "ci-gcc", "configurePreset": "ci-gcc" },
+    { "name": "ci-clang", "configurePreset": "ci-clang" }
   ],
   "testPresets": [
     { "name": "gcc", "configurePreset": "gcc", "output": { "outputOnFailure": true } },
-    { "name": "clang", "configurePreset": "clang", "output": { "outputOnFailure": true } }
+    { "name": "clang", "configurePreset": "clang", "output": { "outputOnFailure": true } },
+    { "name": "ci-gcc", "configurePreset": "ci-gcc", "output": { "outputOnFailure": true } },
+    { "name": "ci-clang", "configurePreset": "ci-clang", "output": { "outputOnFailure": true } }
   ]
 }
