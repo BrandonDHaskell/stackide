@@ -16,7 +16,16 @@ include(Shaders)
 # 3. Core Targets
 add_executable(stackide
         src/stackide/main.cpp
+        src/stackide/options.cpp
+        src/stackide/quad_resources.cpp
+        src/stackide/run_offscreen.cpp
+        src/stackide/run_windowed.cpp
+        include/stackide/constants.hpp
         include/stackide/log.hpp
+        include/stackide/modes.hpp
+        include/stackide/options.hpp
+        include/stackide/quad_resources.hpp
+        include/stackide/scope_exit.hpp
 )
 target_link_libraries(stackide PRIVATE SDL3::SDL3 stackide_warnings)
 target_include_directories(stackide PRIVATE include "${STACKIDE_SHADER_INCLUDE_DIR}")
