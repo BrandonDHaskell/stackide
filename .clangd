@@ -1,5 +1,51 @@
+# .clangd
+#
+# stackide builds with GCC 16 by default, but clangd is Clang 21. Feeding it a
+# GCC compile_commands.json means GCC-only flags and libstdc++ headers that
+# Clang 21 may not parse. Point the symlink at the clang build instead:
+#
+#     ln -s build/clang/compile_commands.json compile_commands.json
+#
+# See docs/toolchain.md for why the IDE index comes from the clang build.
+
 CompileFlags:
   CompilationDatabase: build/clang
+  Add:
+    - -Wno-unknown-warning-option
+    - -Wno-unknown-attributes
+  Remove:
+    # GCC-only diagnostics that Clang rejects outright.
+    - -Wduplicated-cond
+    - -Wduplicated-branches
+    - -Wlogical-op
+    - -Wuseless-cast
+    - -fconcepts-diagnostics-depth=*
+    - -fno-lifetime-dse
+    - -fdiagnostics-*
 
 Diagnostics:
-  Suppress: [no_member]
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  ClangTidy:
+    Add:
+      - bugprone-*
+      - performance-*
+      - modernize-*
+      - readability-*
+      - cppcoreguidelines-*
+    Remove:
+      # Noisy or actively wrong for a renderer touching a C API.
+      - modernize-use-trailing-return-type
+      - readability-identifier-length
+      - cppcoreguidelines-pro-type-vararg
+      - cppcoreguidelines-pro-bounds-pointer-arithmetic
+      - cppcoreguidelines-avoid-magic-numbers
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+
+Index:
+  Background: Build
+  StandardLibrary: Yes

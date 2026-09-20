@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "permissions": {
+    "defaultMode": "default",
+
+    "allow": [
+      "Bash(cmake:*)",
+      "Bash(ctest:*)",
+      "Bash(ninja:*)",
+
+      "Bash(clang-format:*)",
+      "Bash(clang-tidy:*)",
+      "Bash(clangd:*)",
+
+      "Bash(./build/*/stackide:*)",
+      "Bash(gdb --batch:*)",
+
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git blame:*)",
+      "Bash(git stash list:*)",
+      "Bash(git worktree list:*)",
+      "Bash(git add:*)",
+
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(file:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(nproc:*)",
+      "Bash(sha256sum:*)"
+    ],
+
+    "ask": [
+      "Edit(CLAUDE.md)",
+      "Edit(cmake/Dependencies.cmake)",
+      "Edit(cmake/CompilerChecks.cmake)",
+      "Edit(CMakePresets.json)",
+      "Edit(Dockerfile)",
+      "Edit(docs/hardware-environment.md)",
+      "Edit(docs/toolchain.md)",
+      "Edit(.claude/settings.json)",
+      "Edit(.github/workflows/**)",
+
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git restore:*)",
+      "Bash(git merge:*)",
+      "Bash(git rebase:*)",
+      "Bash(git stash:*)"
+    ],
+
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)",
+      "Bash(git clean:*)",
+      "Bash(git filter-branch:*)",
+
+      "Bash(sudo:*)",
+      "Bash(apt:*)",
+      "Bash(apt-get:*)",
+      "Bash(pip:*)",
+      "Bash(pip3:*)",
+      "Bash(npm:*)",
+
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+
+      "Bash(rm -r:*)",
+      "Bash(rm -f:*)",
+      "Bash(rm -rf:*)",
+
+      "Read(**/.env*)",
+      "Read(**/*credential*)",
+      "Read(**/*secret*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)"
+    ]
+  },
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/format-cpp.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
