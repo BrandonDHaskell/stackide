@@ -15,7 +15,8 @@
       }
     },
     {
-      "name": "gcc",
+      "name": "gcc-toolchain",
+      "hidden": true,
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "/opt/gcc/bin/g++",
@@ -25,7 +26,8 @@
       }
     },
     {
-      "name": "clang",
+      "name": "clang-toolchain",
+      "hidden": true,
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "/opt/llvm/bin/clang++",
@@ -35,27 +37,51 @@
         "CMAKE_SHARED_LINKER_FLAGS": "-stdlib=libc++ -rtlib=compiler-rt --unwindlib=libunwind -Wl,-rpath,/opt/llvm/lib/x86_64-unknown-linux-gnu"
       }
     },
+
+    { "name": "gcc", "inherits": "gcc-toolchain" },
+    { "name": "clang", "inherits": "clang-toolchain" },
     {
-      "name": "ci-gcc",
-      "inherits": "gcc",
-      "cacheVariables": { "STACKIDE_HEADLESS": "ON" }
+      "name": "gcc-release",
+      "inherits": "gcc-toolchain",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
     },
     {
-      "name": "ci-clang",
-      "inherits": "clang",
-      "cacheVariables": { "STACKIDE_HEADLESS": "ON" }
+      "name": "clang-release",
+      "inherits": "clang-toolchain",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
     }
   ],
+
   "buildPresets": [
     { "name": "gcc", "configurePreset": "gcc" },
     { "name": "clang", "configurePreset": "clang" },
-    { "name": "ci-gcc", "configurePreset": "ci-gcc" },
-    { "name": "ci-clang", "configurePreset": "ci-clang" }
+    { "name": "gcc-release", "configurePreset": "gcc-release" },
+    { "name": "clang-release", "configurePreset": "clang-release" }
   ],
+
   "testPresets": [
-    { "name": "gcc", "configurePreset": "gcc", "output": { "outputOnFailure": true } },
-    { "name": "clang", "configurePreset": "clang", "output": { "outputOnFailure": true } },
-    { "name": "ci-gcc", "configurePreset": "ci-gcc", "output": { "outputOnFailure": true } },
-    { "name": "ci-clang", "configurePreset": "ci-clang", "output": { "outputOnFailure": true } }
+    {
+      "name": "all",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "ci",
+      "hidden": true,
+      "inherits": "all",
+      "filter": { "exclude": { "label": "display" } },
+      "environment": { "STACKIDE_REQUIRE_GPU": "1" }
+    },
+
+    { "name": "gcc", "inherits": "all", "configurePreset": "gcc" },
+    { "name": "clang", "inherits": "all", "configurePreset": "clang" },
+    { "name": "gcc-release", "inherits": "all", "configurePreset": "gcc-release" },
+    { "name": "clang-release", "inherits": "all", "configurePreset": "clang-release" },
+
+    { "name": "ci-gcc", "inherits": "ci", "configurePreset": "gcc" },
+    { "name": "ci-clang", "inherits": "ci", "configurePreset": "clang" },
+    { "name": "ci-gcc-release", "inherits": "ci", "configurePreset": "gcc-release" },
+    { "name": "ci-clang-release", "inherits": "ci", "configurePreset": "clang-release" }
   ]
 }

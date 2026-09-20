@@ -3,13 +3,13 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: ghcr.io/brandondhaskell/stackide-toolchain:latest
+    container: ghcr.io/brandondhaskell/stackide-toolchain:gcc16-llvm21
     strategy:
       fail-fast: false
       matrix:
-        preset: [ci-gcc, ci-clang]
+        preset: [ gcc, clang, gcc-release, clang-release ]
     steps:
       - uses: actions/checkout@v5
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
-      - run: ctest --preset ${{ matrix.preset }}
+      - run: ctest --preset ci-${{ matrix.preset }}
