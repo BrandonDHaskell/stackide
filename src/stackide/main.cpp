@@ -107,13 +107,13 @@ int main(int argc, char** argv) {
         SDL_SubmitGPUCommandBuffer(cmd);
 
         const auto now = clock::now();
-        const auto frame_us =
-            std::chrono::duration_cast<std::chrono::microseconds>(now - last).count();
+        const auto frame_ms =
+            std::chrono::duration<double, std::milli>(now - last).count();
         last = now;
         ++frames;
 
         if (frames % 60 == 0) {
-            std::println(stderr, "frame: {:.2f} ms", frame_us / 1000.0);
+            std::println(stderr, "frame: {:.2f} ms", frame_ms);
         }
 
         if (smoke && frames >= 3) running = false;

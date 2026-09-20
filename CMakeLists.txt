@@ -5,7 +5,8 @@ option(STACKIDE_HEADLESS "Build without GUI backends" OFF)
 
 include(cmake/Dependencies.cmake)
 
-add_executable(stackide src/stackide/main.cpp)
+add_executable(stackide src/stackide/main.cpp
+        include/stackide/log.hpp)
 target_link_libraries(stackide PRIVATE SDL3::SDL3)
 target_include_directories(stackide PRIVATE include)
 
