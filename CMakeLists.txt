@@ -11,6 +11,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # 2. Dependencies
 include(CompilerChecks)
 include(cmake/Dependencies.cmake)
+include(Shaders)
 
 # 3. Core Targets
 add_executable(stackide
@@ -18,7 +19,10 @@ add_executable(stackide
         include/stackide/log.hpp
 )
 target_link_libraries(stackide PRIVATE SDL3::SDL3 stackide_warnings)
-target_include_directories(stackide PRIVATE include)
+target_include_directories(stackide PRIVATE include "${STACKIDE_SHADER_INCLUDE_DIR}")
+
+stackide_add_shader(stackide shaders/quad.vert.glsl vert kQuadVertSpv)
+stackide_add_shader(stackide shaders/quad.frag.glsl frag kQuadFragSpv)
 
 # add_subdirectory(src)
 
