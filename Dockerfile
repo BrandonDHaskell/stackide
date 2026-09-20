@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
         libxfixes-dev libxkbcommon-dev libwayland-dev wayland-protocols \
         libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev libdrm-dev libgbm-dev \
-        libasound2-dev libpulse-dev libudev-dev \
+        libasound2-dev libpulse-dev libudev-dev libxss-dev libxtst-dev \
         \
         # GLSL to SPIR-V compiler for M1's shader-embedding build step. A leaf
         # build tool, not a pinned toolchain component like GCC/LLVM/CMake/
