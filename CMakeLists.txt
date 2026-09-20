@@ -11,14 +11,18 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # 2. Dependencies
 include(CompilerChecks)
 include(cmake/Dependencies.cmake)
+include(Shaders)
 
 # 3. Core Targets
 add_executable(stackide
         src/stackide/main.cpp
         include/stackide/log.hpp
 )
-target_link_libraries(stackide PRIVATE SDL3::SDL3)
-target_include_directories(stackide PRIVATE include)
+target_link_libraries(stackide PRIVATE SDL3::SDL3 stackide_warnings)
+target_include_directories(stackide PRIVATE include "${STACKIDE_SHADER_INCLUDE_DIR}")
+
+stackide_add_shader(stackide shaders/quad.vert.glsl vert kQuadVertSpv)
+stackide_add_shader(stackide shaders/quad.frag.glsl frag kQuadFragSpv)
 
 # add_subdirectory(src)
 
@@ -26,16 +30,7 @@ target_include_directories(stackide PRIVATE include)
 if(STACKIDE_BUILD_TESTS)
     enable_testing()
 
-    # Unit tests in subdirectories
+    # Smoke and unit tests. tests/CMakeLists.txt is the single source of
+    # truth for test registration; do not duplicate add_test() calls here.
     add_subdirectory(tests)
-
-    # Integration / Smoke tests
-    add_test(NAME smoke_headless  COMMAND stackide --headless)
-    add_test(NAME smoke_offscreen COMMAND stackide --offscreen --allow-skip)
-    add_test(NAME smoke_windowed  COMMAND stackide --frames 3 --timeout-ms 10000)
-    add_test(NAME runs            COMMAND stackide --smoke)
-
-    set_tests_properties(smoke_headless smoke_offscreen smoke_windowed
-            PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
-    set_tests_properties(smoke_windowed PROPERTIES LABELS "gpu;display")
 endif()

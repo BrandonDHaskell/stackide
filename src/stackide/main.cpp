@@ -18,6 +18,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <print>
@@ -37,6 +38,13 @@ inline constexpr int kWindowHeight = 800;
 inline constexpr int kOffscreenWidth = 64;
 inline constexpr int kOffscreenHeight = 64;
 
+// Swapchain and offscreen target both use an sRGB-encoded format (decision 3
+// in docs/buildouts/M1-textured-quad.md): the eventual glyph atlas needs
+// linear-space alpha blending for antialiased edges, so this is load-bearing
+// now rather than retrofitted once text rendering exists.
+inline constexpr SDL_GPUTextureFormat kOffscreenColorFormat =
+    SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+
 // The clear color is defined in 8-bit terms so the offscreen mode can assert
 // exact byte values. Float form is derived, never the other way around.
 inline constexpr std::uint8_t kClearR = 0x1A;
@@ -52,12 +60,18 @@ inline constexpr int kExitSkip = 77;
 
 inline constexpr Uint64 kDefaultTimeoutMs = 10'000;
 
-constexpr float unorm(std::uint8_t v) noexcept {
-    return static_cast<float>(v) / 255.0f;
+// An _SRGB texture format auto-encodes a shader's linear float output to its
+// sRGB-encoded byte storage. To keep the clear assertion's expected bytes
+// (kClearR/G/B/A) exactly as they are, the clear color fed to SDL has to be
+// the *decoded* linear value that round-trips back through that encode.
+float srgb_decode(std::uint8_t v) noexcept {
+    const float c = static_cast<float>(v) / 255.0f;
+    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
 }
 
-constexpr SDL_FColor clear_color() noexcept {
-    return SDL_FColor{unorm(kClearR), unorm(kClearG), unorm(kClearB), unorm(kClearA)};
+SDL_FColor clear_color() noexcept {
+    return SDL_FColor{srgb_decode(kClearR), srgb_decode(kClearG), srgb_decode(kClearB),
+                       srgb_decode(kClearA)};
 }
 
 // ---------------------------------------------------------------------------
@@ -191,10 +205,10 @@ int run_offscreen(const Options& opts) {
 
     std::println(stderr, "offscreen: gpu driver = {}", SDL_GetGPUDeviceDriver(gpu));
 
-    constexpr auto kFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    constexpr auto kFormat = kOffscreenColorFormat;
     if (!SDL_GPUTextureSupportsFormat(gpu, kFormat, SDL_GPU_TEXTURETYPE_2D,
                                       SDL_GPU_TEXTUREUSAGE_COLOR_TARGET)) {
-        std::println(stderr, "R8G8B8A8_UNORM color target unsupported on this device");
+        std::println(stderr, "R8G8B8A8_UNORM_SRGB color target unsupported on this device");
         return EXIT_FAILURE;
     }
 
@@ -346,7 +360,24 @@ int run_windowed(const Options& opts) {
     }
     ScopeExit release_window{[gpu, window] { SDL_ReleaseWindowFromGPUDevice(gpu, window); }};
 
+    // SDR_LINEAR is required (decision 3), not a soft preference: never fall
+    // back to plain SDR composition if this device doesn't support it.
+    if (!SDL_WindowSupportsGPUSwapchainComposition(gpu, window,
+                                                    SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR)) {
+        std::println(stderr, "SDR_LINEAR swapchain composition not supported on this device");
+        return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
+    }
+    // Present mode is fixed at VSYNC until --present-mode lands; only the
+    // composition is being set explicitly here.
+    if (!SDL_SetGPUSwapchainParameters(gpu, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR,
+                                        SDL_GPU_PRESENTMODE_VSYNC)) {
+        std::println(stderr, "SDL_SetGPUSwapchainParameters failed: {}", SDL_GetError());
+        return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
+    }
+
     std::println(stderr, "gpu driver: {}", SDL_GetGPUDeviceDriver(gpu));
+    std::println(stderr, "swapchain format: {}",
+                 static_cast<int>(SDL_GetGPUSwapchainTextureFormat(gpu, window)));
 
     using clock = std::chrono::steady_clock;
     auto last = clock::now();

@@ -11,16 +11,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/cache@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # Build locally first (not pushed yet) so the actual installed
+      # component versions can be read back out of the image. GCC/LLVM
+      # versions come from the /opt/gcc-*, /opt/llvm-* symlink targets the
+      # Dockerfile creates; glslang-tools isn't pinned (see
+      # docs/buildouts/M1-textured-quad.md decision 1), so its resolved apt
+      # version has to be read back the same way.
+      - uses: docker/build-push-action@v6
         with:
-          path: build/${{ matrix.preset }}/_deps
-          key: deps-${{ matrix.preset }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          context: .
+          push: false
+          load: true
+          platforms: linux/amd64
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: stackide-toolchain:build
+
+      - name: Resolve image tag from installed component versions
+        id: version
+        run: |
+          set -eu
+          gcc_ver=$(docker run --rm stackide-toolchain:build readlink /opt/gcc | sed 's#^/opt/gcc-##')
+          llvm_ver=$(docker run --rm stackide-toolchain:build readlink /opt/llvm | sed 's#^/opt/llvm-##')
+          glslang_ver=$(docker run --rm stackide-toolchain:build \
+            dpkg-query -W -f='${Version}' glslang-tools | sed -e 's/[+~:]/-/g')
+          tag="gcc${gcc_ver}-llvm${llvm_ver}-glslang${glslang_ver}"
+          echo "Resolved tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/setup-buildx-action@v3
+
+      # Cached from the build above (same context, same cache-from), so this
+      # doesn't rebuild anything -- it just re-exports and pushes under the
+      # tags CI actually needs.
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -29,4 +59,6 @@ jobs:
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: ghcr.io/brandondhaskell/stackide-toolchain:latest
+          tags: |
+            ghcr.io/brandondhaskell/stackide-toolchain:${{ steps.version.outputs.tag }}
+            ghcr.io/brandondhaskell/stackide-toolchain:latest

@@ -56,7 +56,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
         libxfixes-dev libxkbcommon-dev libwayland-dev wayland-protocols \
         libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev libdrm-dev libgbm-dev \
-        libasound2-dev libpulse-dev libudev-dev \
+        libasound2-dev libpulse-dev libudev-dev libxss-dev libxtst-dev \
+        \
+        # GLSL to SPIR-V compiler for M1's shader-embedding build step. A leaf
+        # build tool, not a pinned toolchain component like GCC/LLVM/CMake/
+        # Ninja above: apt-managed, version recorded (not pinned) below.
+        glslang-tools \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=gcc-build /opt/gcc-${GCC} /opt/gcc-${GCC}
@@ -108,6 +113,13 @@ RUN printf '%s\n' \
     'ninja --version' \
     'clangd --version' \
     'vulkaninfo --summary' \
+    'glslang --version' \
     > /usr/local/bin/stackide-toolchain-check \
     && chmod +x /usr/local/bin/stackide-toolchain-check \
     && stackide-toolchain-check
+
+# Recorded, not pinned (see docs/buildouts/M1-textured-quad.md decision 1):
+# the resolved glslang-tools version becomes part of this image's published
+# tag (see .github/workflows/image.yml), so it's captured here in the build
+# log rather than guessed in the Dockerfile.
+RUN dpkg-query -W -f='glslang-tools version: ${Version}\n' glslang-tools

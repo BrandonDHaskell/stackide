@@ -3,7 +3,7 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: ghcr.io/brandondhaskell/stackide-toolchain:gcc16-llvm21
+    container: ghcr.io/brandondhaskell/stackide-toolchain:gcc16.2.0-llvm23.1.1-glslang15.1.0-1.4.309.0-1
     strategy:
       fail-fast: false
       matrix:
