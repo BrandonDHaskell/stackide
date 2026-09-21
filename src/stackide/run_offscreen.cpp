@@ -1,32 +1,52 @@
 #include <stackide/modes.hpp>
 
 #include <stackide/constants.hpp>
+#include <stackide/quad_resources.hpp>
 #include <stackide/scope_exit.hpp>
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <print>
+#include <utility>
 
 namespace stackide {
 namespace {
 
-bool pixel_matches(const std::uint8_t* px) {
+bool pixel_matches(const std::uint8_t* px, std::array<std::uint8_t, 4> expected) {
     const auto near = [](std::uint8_t got, std::uint8_t want) {
         return std::abs(static_cast<int>(got) - static_cast<int>(want)) <= kChannelTolerance;
     };
-    return near(px[0], kClearR) && near(px[1], kClearG) &&
-           near(px[2], kClearB) && near(px[3], kClearA);
+    return near(px[0], expected[0]) && near(px[1], expected[1]) &&
+           near(px[2], expected[2]) && near(px[3], expected[3]);
+}
+
+bool check_pixel(const std::uint8_t* pixels, Uint32 offset, std::array<std::uint8_t, 4> expected) {
+    const std::uint8_t* px = pixels + offset;
+    if (pixel_matches(px, expected)) {
+        return true;
+    }
+    std::println(stderr,
+                 "pixel mismatch at byte {}: got {:02X}{:02X}{:02X}{:02X}, "
+                 "expected {:02X}{:02X}{:02X}{:02X}",
+                 offset, px[0], px[1], px[2], px[3],
+                 expected[0], expected[1], expected[2], expected[3]);
+    return false;
 }
 
 } // namespace
 
 int run_offscreen(const Options& opts) {
-    // No window is created, so the dummy video driver is sufficient and the
-    // binary runs on a CI host with no display server.
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    // No window is created and this needs to run on a CI host with no
+    // display server, but it still has to be the "offscreen" driver rather
+    // than "dummy": dummy never wires up Vulkan_CreateSurface, so
+    // SDL_CreateGPUDevice fails unconditionally under it regardless of
+    // hardware availability.
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::println(stderr, "SDL_Init failed: {}", SDL_GetError());
@@ -68,6 +88,17 @@ int run_offscreen(const Options& opts) {
     }
     ScopeExit destroy_tex{[gpu, color] { SDL_ReleaseGPUTexture(gpu, color); }};
 
+    std::optional<QuadResources> quad = create_quad_resources(gpu, kFormat);
+    if (!quad) {
+        return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
+    }
+    ScopeExit destroy_quad{[gpu, res = *quad] { destroy_quad_resources(gpu, res); }};
+
+    // The checker-to-pixel mapping below assumes the render target and the
+    // checkerboard texture are the same size, so a texel lands on exactly
+    // one output pixel with no scaling.
+    static_assert(kOffscreenWidth == kCheckerSize && kOffscreenHeight == kCheckerSize);
+
     constexpr Uint32 kPixelBytes = 4;
     constexpr Uint32 kBufferSize = kOffscreenWidth * kOffscreenHeight * kPixelBytes;
 
@@ -100,6 +131,25 @@ int run_offscreen(const Options& opts) {
         SDL_CancelGPUCommandBuffer(cmd);
         return EXIT_FAILURE;
     }
+
+    SDL_BindGPUGraphicsPipeline(pass, quad->pipeline);
+
+    const SDL_GPUBufferBinding vb_binding{quad->vertex_buffer, 0};
+    SDL_BindGPUVertexBuffers(pass, 0, &vb_binding, 1);
+
+    const SDL_GPUBufferBinding ib_binding{quad->index_buffer, 0};
+    SDL_BindGPUIndexBuffer(pass, &ib_binding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+
+    const SDL_GPUTextureSamplerBinding tex_binding{quad->texture, quad->sampler};
+    SDL_BindGPUFragmentSamplers(pass, 0, &tex_binding, 1);
+
+    // Identity for now: real aspect-preserving letterboxing lands with
+    // resize handling (item 8), which is what this uniform exists for.
+    constexpr float kIdentityScale[2] = {1.0f, 1.0f};
+    SDL_PushGPUVertexUniformData(cmd, 0, kIdentityScale, sizeof(kIdentityScale));
+
+    SDL_DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0);
+
     SDL_EndGPURenderPass(pass);
 
     SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
@@ -145,23 +195,28 @@ int run_offscreen(const Options& opts) {
     }
     ScopeExit unmap{[gpu, transfer] { SDL_UnmapGPUTransferBuffer(gpu, transfer); }};
 
-    // Check a corner and the center: catches a clear that only partially lands.
-    constexpr Uint32 kCenter =
-        (kOffscreenHeight / 2 * kOffscreenWidth + kOffscreenWidth / 2) * kPixelBytes;
+    // Four checker cells, including a boundary pair straddling x=8 on the
+    // same row: catches both correct sampling and an off-by-one in the
+    // checker's cell math.
+    constexpr Uint32 kBoundaryLightOffset = (7 * kOffscreenWidth + 7) * kPixelBytes;
+    constexpr Uint32 kBoundaryDarkOffset = (7 * kOffscreenWidth + 8) * kPixelBytes;
+    constexpr Uint32 kInteriorOffset = (32 * kOffscreenWidth + 32) * kPixelBytes;
+    constexpr Uint32 kFarCornerOffset = (0 * kOffscreenWidth + 63) * kPixelBytes;
 
-    for (const Uint32 offset : {Uint32{0}, kCenter}) {
-        const std::uint8_t* px = pixels + offset;
-        if (!pixel_matches(px)) {
-            std::println(stderr,
-                         "pixel mismatch at byte {}: got {:02X}{:02X}{:02X}{:02X}, "
-                         "expected {:02X}{:02X}{:02X}{:02X}",
-                         offset, px[0], px[1], px[2], px[3],
-                         kClearR, kClearG, kClearB, kClearA);
+    const std::pair<Uint32, std::array<std::uint8_t, 4>> checks[] = {
+        {kBoundaryLightOffset, kCheckerLight},
+        {kBoundaryDarkOffset, kCheckerDark},
+        {kInteriorOffset, kCheckerLight},
+        {kFarCornerOffset, kCheckerDark},
+    };
+
+    for (const auto& [offset, expected] : checks) {
+        if (!check_pixel(pixels, offset, expected)) {
             return EXIT_FAILURE;
         }
     }
 
-    std::println(stderr, "offscreen: clear verified at {}x{}", kOffscreenWidth,
+    std::println(stderr, "offscreen: quad verified at {}x{} (4 UV checks)", kOffscreenWidth,
                  kOffscreenHeight);
     return EXIT_SUCCESS;
 }
