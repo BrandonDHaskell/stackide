@@ -47,6 +47,32 @@ set_tests_properties(smoke.windowed PROPERTIES
 list(APPEND STACKIDE_SMOKE_TESTS smoke.windowed)
 
 # ---------------------------------------------------------------------------
+# Tier 4: timing gates (M1 items 6/7). Local/self-hosted hardware only, same
+# as Tier 3 -- both the frame-cost floor and the live refresh rate are
+# properties of real hardware, not something CI's headless container has.
+# ---------------------------------------------------------------------------
+add_test(NAME smoke.frame_cost_gate
+        COMMAND stackide --present-mode immediate --frames 1000
+                --assert-p99-under-ms 2.0 --allow-skip)
+set_tests_properties(smoke.frame_cost_gate PROPERTIES
+        LABELS "smoke;gpu;display"
+        RESOURCE_LOCK gpu)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.frame_cost_gate)
+
+# Zero dropped frames requires a quiet desktop: this checks the render loop's
+# own cadence, not the desktop's. A busy machine (heavy browser/IDE/system
+# monitor load) can itself induce scheduler contention that shows up here as
+# a dropped frame with no code-level cause -- close background load first if
+# this fails and the number is small (1-2 over 600).
+add_test(NAME smoke.cadence_gate
+        COMMAND stackide --present-mode vsync --frames 600
+                --assert-max-dropped-frames 0)
+set_tests_properties(smoke.cadence_gate PROPERTIES
+        LABELS "smoke;gpu;display"
+        RESOURCE_LOCK gpu)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.cadence_gate)
+
+# ---------------------------------------------------------------------------
 # Negative tests: bad input must fail loudly, not fall back to a default.
 # ---------------------------------------------------------------------------
 add_test(NAME smoke.rejects_unknown_flag
@@ -62,6 +88,41 @@ set_tests_properties(smoke.rejects_missing_frame_count PROPERTIES
         LABELS "smoke"
         WILL_FAIL TRUE)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_missing_frame_count)
+
+add_test(NAME smoke.rejects_bad_present_mode
+        COMMAND stackide --present-mode bogus)
+set_tests_properties(smoke.rejects_bad_present_mode PROPERTIES
+        LABELS "smoke"
+        WILL_FAIL TRUE)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_bad_present_mode)
+
+add_test(NAME smoke.rejects_negative_assert_p99
+        COMMAND stackide --assert-p99-under-ms -1.0 --present-mode immediate)
+set_tests_properties(smoke.rejects_negative_assert_p99 PROPERTIES
+        LABELS "smoke"
+        WILL_FAIL TRUE)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_negative_assert_p99)
+
+add_test(NAME smoke.rejects_assert_p99_in_offscreen
+        COMMAND stackide --offscreen --assert-p99-under-ms 2.0)
+set_tests_properties(smoke.rejects_assert_p99_in_offscreen PROPERTIES
+        LABELS "smoke"
+        WILL_FAIL TRUE)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_assert_p99_in_offscreen)
+
+add_test(NAME smoke.rejects_assert_p99_in_vsync
+        COMMAND stackide --assert-p99-under-ms 2.0)
+set_tests_properties(smoke.rejects_assert_p99_in_vsync PROPERTIES
+        LABELS "smoke"
+        WILL_FAIL TRUE)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_assert_p99_in_vsync)
+
+add_test(NAME smoke.rejects_dropped_gate_in_immediate
+        COMMAND stackide --present-mode immediate --assert-max-dropped-frames 0)
+set_tests_properties(smoke.rejects_dropped_gate_in_immediate PROPERTIES
+        LABELS "smoke"
+        WILL_FAIL TRUE)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_dropped_gate_in_immediate)
 
 # ---------------------------------------------------------------------------
 # Properties shared by every test above.
