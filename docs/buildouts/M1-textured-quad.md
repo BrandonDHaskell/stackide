@@ -1,6 +1,6 @@
 # Milestone 1: Textured Quad
 
-Status: open
+Status: closed 2026-11-06
 Opened: 2026-09-20
 Owner: Brandon
 
@@ -23,7 +23,8 @@ rather than an infrastructure problem.
 Each item is verifiable by a command. An item with no way to check it is not
 done, it is asserted.
 
-1. **Shaders compile at build time.** GLSL sources under `shaders/` compile to
+1. **Shaders compile at build time.** Sources under `shaders/` (GLSL during M1, HLSL
+   since `docs/adr/0002-hlsl-via-glslang.md`) compile to
    SPIR-V via a CMake custom command and are embedded in the binary. No shader
    files are read at runtime and no shader source ships with the binary.
 2. **Quad renders.** A single quad samples a generated checkerboard texture
@@ -48,7 +49,7 @@ done, it is asserted.
 9. **Clean build.** Zero warnings with `-Werror` on the `gcc`, `clang`,
    `gcc-release`, and `clang-release` presets.
 10. **Clean static analysis.** `clang-tidy` reports nothing under the check set
-    in `.clangd`.
+    in `.clang-tidy`.
 11. **All tests green.** `ctest --preset gcc` and `--preset clang` pass locally;
     `ctest --preset ci-gcc` and `--preset ci-clang` pass in the toolchain
     container.
@@ -105,8 +106,15 @@ The development display runs both. The 100 Hz budget is the binding one and is
 what the gates above are set against.
 
 **CPU frame time** is measured from the top of the loop iteration to the return
-of `SDL_SubmitGPUCommandBuffer`. It excludes the vsync wait, which is why frame
-cost is measured in immediate mode.
+of `SDL_SubmitGPUCommandBuffer`. Under vsync, the time spent waiting to acquire
+the swapchain texture is subtracted, because that is where the vsync wait
+happens. In immediate mode that wait is GPU back-pressure and stays included,
+which is why frame cost is gated there.
+
+Measurements before ADR-0002 ran on X11 through XWayland, because that was SDL's own
+default. Windows now use Wayland by default, so the frame-cost gate pins X11 (a Wayland
+compositor throttles immediate mode to the refresh rate) and the cadence gate runs on
+Wayland.
 
 **Input to paint** is measured from the SDL event timestamp to the return of
 `SDL_SubmitGPUCommandBuffer` for the frame that reflects it. It deliberately

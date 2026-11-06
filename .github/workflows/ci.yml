@@ -7,9 +7,89 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [ gcc, clang, gcc-release, clang-release ]
+        preset:
+          - gcc
+          - clang
+          - gcc-release
+          - clang-release
+          - gcc-asan
+          - clang-asan
+          - gcc-profile
     steps:
       - uses: actions/checkout@v5
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
       - run: ctest --preset ci-${{ matrix.preset }}
+      - name: Record log call cost
+        if: endsWith(matrix.preset, '-release')
+        run: build/${{ matrix.preset }}/tests/stackide_log_bench
+      # On software rendering, so these numbers track changes rather than real performance.
+      - name: Record a performance summary
+        if: endsWith(matrix.preset, '-release')
+        run: build/${{ matrix.preset }}/stackide --offscreen --profile-frames 300 --profile-output profile-${{ matrix.preset }}.json
+      - name: Save the performance summary
+        if: endsWith(matrix.preset, '-release')
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-${{ matrix.preset }}
+          path: profile-${{ matrix.preset }}.json
+
+  # TSan can't run under the runner's high ASLR entropy. Its fallback is to re-exec
+  # with ASLR disabled, which Docker's default seccomp profile blocks.
+  tsan:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/brandondhaskell/stackide-toolchain:gcc16.2.0-llvm23.1.1-glslang15.1.0-1.4.309.0-1
+      options: --security-opt seccomp=unconfined
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [gcc-tsan, clang-tsan]
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake --preset ${{ matrix.preset }}
+      - run: cmake --build --preset ${{ matrix.preset }}
+      - run: ctest --preset ci-${{ matrix.preset }}
+
+  lint:
+    runs-on: ubuntu-latest
+    container: ghcr.io/brandondhaskell/stackide-toolchain:gcc16.2.0-llvm23.1.1-glslang15.1.0-1.4.309.0-1
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake --preset clang
+      - run: cmake --build --preset clang --target format-check tidy
+
+  # Compile check only: rendering on macOS needs Metal shaders, which don't exist yet.
+  macos:
+    runs-on: macos-latest
+    env:
+      LLVM_VERSION: 23.1.1
+      LLVM_SHA256: 64220f1c99132ef7e580447781b84f96fbba6862a43a8f6522b423052cd67502
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install glslang ninja
+      - run: |
+          echo "LLVM_ROOT=$HOME/llvm-$LLVM_VERSION" >> "$GITHUB_ENV"
+          # LLVM's own clang doesn't find Apple's SDK by itself.
+          echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
+      - id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-${{ env.LLVM_VERSION }}
+          key: llvm-${{ env.LLVM_VERSION }}-macos-arm64
+      - if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          archive="LLVM-$LLVM_VERSION-macOS-ARM64.tar.xz"
+          curl -fsSL -o "$archive" "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/$archive"
+          echo "$LLVM_SHA256  $archive" | shasum -a 256 -c -
+          mkdir -p "$LLVM_ROOT"
+          tar -xf "$archive" -C "$LLVM_ROOT" --strip-components=1
+      - run: cmake --preset macos
+      # Keeps going after an error, so that one run reports every macOS-only failure.
+      - run: cmake --build --preset macos -- -k 0
+      - name: Show why configuration failed
+        if: failure()
+        run: |
+          find "$LLVM_ROOT" \( -name 'libc++*.dylib' -o -name 'libc++.a' -o -name 'libunwind*.dylib' \)
+          xcrun --show-sdk-path
+          grep -E 'error:|ld:|fatal|undefined|not found' build/macos/CMakeFiles/CMakeConfigureLog.yaml | sort -u | head -40

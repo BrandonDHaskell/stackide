@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         \
         # Vulkan runtime. lavapipe is the software ICD that makes the
         # --offscreen smoke test runnable on a runner with no GPU.
-        libvulkan1 mesa-vulkan-drivers vulkan-tools \
+        libvulkan1 mesa-vulkan-drivers vulkan-tools vulkan-validationlayers \
         \
         # SDL3 build dependencies. Required whether SDL arrives via
         # FetchContent or the system package; see docs/toolchain.md.
@@ -98,8 +98,8 @@ RUN set -eux; \
 # uid. Without this, every git invocation fails with "dubious ownership".
 RUN git config --system --add safe.directory '*'
 
-# Headless by default. The --offscreen smoke test creates no window, so the
-# dummy video driver is sufficient and no X or Wayland server is needed.
+# Headless by default, since no X or Wayland server is available. --offscreen
+# can't use dummy (no Vulkan surface), so it overrides this with SDL_HINT_OVERRIDE.
 ENV SDL_VIDEODRIVER=dummy
 
 # Fail the image build, not a downstream job, when a component is missing or
@@ -113,6 +113,7 @@ RUN printf '%s\n' \
     'ninja --version' \
     'clangd --version' \
     'vulkaninfo --summary' \
+    'test -f /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json' \
     'glslang --version' \
     > /usr/local/bin/stackide-toolchain-check \
     && chmod +x /usr/local/bin/stackide-toolchain-check \

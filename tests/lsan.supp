@@ -1,0 +1,7 @@
+# LeakSanitizer suppressions for tests that create a window or GPU device.
+#
+# libdbus keeps its shared connection and the messages on it until dbus_shutdown(). SDL only
+# calls that when SDL_HINT_SHUTDOWN_DBUS_ON_QUIT is set, which is unsafe here because the
+# Vulkan drivers use the same connection. This matches stacks that pass through libdbus, so
+# a leak from STACK or SDL's own code still fails.
+leak:libdbus-1.so

@@ -1,0 +1,24 @@
+---
+# Noisy or actively wrong for a renderer touching a C API:
+#   modernize-use-trailing-return-type, readability-identifier-length,
+#   cppcoreguidelines-pro-type-vararg,
+#   cppcoreguidelines-pro-bounds-pointer-arithmetic,
+#   cppcoreguidelines-avoid-magic-numbers
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  readability-*,
+  cppcoreguidelines-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-avoid-magic-numbers
+HeaderFilterRegex: 'src/.*/include/stackide/.*'
+CheckOptions:
+  # The log macros expand to branches at every call site, which says nothing about
+  # how hard the calling function is to follow.
+  readability-function-cognitive-complexity.IgnoreMacros: true
+...
