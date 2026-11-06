@@ -59,6 +59,7 @@ add_library(stackide_profile STATIC
         src/profile/percentile.cpp
         src/profile/stall_detector.cpp
         src/profile/include/stackide/profile/percentile.hpp
+        src/profile/include/stackide/profile/sample_window.hpp
         src/profile/include/stackide/profile/stall_detector.hpp
 )
 target_include_directories(stackide_profile PUBLIC src/profile/include)
@@ -83,10 +84,12 @@ target_link_libraries(stackide_core
 # The only module besides render that may use SDL. Its public headers don't include it.
 add_library(stackide_platform STATIC
         src/platform/event.cpp
+        src/platform/frame_scheduler.cpp
         src/platform/main_loop.cpp
         src/platform/video.cpp
         src/platform/window.cpp
         src/platform/include/stackide/platform/event.hpp
+        src/platform/include/stackide/platform/frame_scheduler.hpp
         src/platform/include/stackide/platform/main_loop.hpp
         src/platform/include/stackide/platform/video.hpp
         src/platform/include/stackide/platform/window.hpp

@@ -7,6 +7,15 @@
 namespace stackide::platform
 {
 
+    std::uint64_t now_ns() { return SDL_GetTicksNS(); }
+
+    void post_test_input()
+    {
+        SDL_Event event{};
+        event.type = SDL_EVENT_KEY_DOWN;
+        SDL_PushEvent(&event);
+    }
+
     bool poll_event(Event& out)
     {
         SDL_Event event;
@@ -25,7 +34,15 @@ namespace stackide::platform
                     out.type = EventType::Quit;
                     return true;
                 }
-                break;
+                out.type = EventType::Input;
+                return true;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_WHEEL:
+                out.type = EventType::Input;
+                return true;
+            case SDL_EVENT_WINDOW_EXPOSED:
+                out.type = EventType::Exposed;
+                return true;
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 out.type = EventType::WindowResized;
                 out.size = PixelSize{.width = event.window.data1, .height = event.window.data2};

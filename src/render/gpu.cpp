@@ -276,16 +276,17 @@ namespace stackide::render
         }
     }
 
-    std::optional<SDL_GPUTexture*> CommandBuffer::wait_for_swapchain_texture(const Swapchain& swapchain)
+    std::optional<SwapchainTarget> CommandBuffer::wait_for_swapchain_texture(const Swapchain& swapchain)
     {
-        SDL_GPUTexture* texture = nullptr;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer_, swapchain.window(), &texture, nullptr, nullptr))
+        SwapchainTarget target;
+        if (!SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer_, swapchain.window(), &target.texture, &target.width,
+                                                   &target.height))
         {
             STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_WaitAndAcquireGPUSwapchainTexture failed: {}", SDL_GetError());
             return std::nullopt;
         }
-        acquired_swapchain_ = texture != nullptr;
-        return texture;
+        acquired_swapchain_ = target.texture != nullptr;
+        return target;
     }
 
     std::optional<RenderPass> CommandBuffer::begin_render_pass(SDL_GPUTexture* target, SDL_FColor clear)

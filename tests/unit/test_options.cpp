@@ -31,7 +31,7 @@ namespace
 
 } // namespace
 
-TEST_CASE("no arguments selects a windowed vsync run")
+TEST_CASE("no arguments selects a windowed vsync run with no deadline")
 {
     const auto opts = parse({});
 
@@ -39,7 +39,7 @@ TEST_CASE("no arguments selects a windowed vsync run")
     CHECK(opts->mode == stackide::Mode::Windowed);
     CHECK(opts->present_mode == stackide::PresentMode::Vsync);
     CHECK(opts->frames == 0);
-    CHECK(opts->timeout_ms == stackide::kDefaultTimeoutMs);
+    CHECK(opts->timeout_ms == 0);
     CHECK_FALSE(opts->allow_skip);
 }
 
@@ -130,4 +130,38 @@ TEST_CASE("injecting a stall is windowed only")
 
     CHECK_FALSE(parse({"--inject-stall-ms", "0"}));
     CHECK_FALSE(parse({"--offscreen", "--inject-stall-ms", "50"}));
+}
+
+TEST_CASE("a bounded run's default deadline grows with its length")
+{
+    const auto short_run = parse({"--frames", "10"});
+    const auto long_run = parse({"--frames", "600"});
+    REQUIRE(short_run);
+    REQUIRE(long_run);
+    CHECK(short_run->timeout_ms >= stackide::kDefaultTimeoutMs);
+    // 600 frames at 60 Hz take 10 seconds, which has to fit with room to spare.
+    CHECK(long_run->timeout_ms > 15'000);
+
+    const auto explicit_deadline = parse({"--frames", "600", "--timeout-ms", "5"});
+    REQUIRE(explicit_deadline);
+    CHECK(explicit_deadline->timeout_ms == 5);
+}
+
+TEST_CASE("frame scheduler test flags are checked")
+{
+    CHECK(parse({"--idle-ms", "2000", "--redraw-every-ms", "100"}));
+    CHECK(parse({"--inject-input", "5", "--assert-input-to-paint-under-ms", "8"}));
+    CHECK(parse({"--frames", "5", "--assert-within-budget-percent", "99"}));
+    CHECK(parse({"--frames", "5", "--inject-input", "5", "--input-sampling", "naive"}));
+
+    CHECK_FALSE(parse({"--idle-ms", "10"}));
+    CHECK_FALSE(parse({"--idle-ms", "2000", "--frames", "5"}));
+    CHECK_FALSE(parse({"--idle-ms", "2000", "--inject-input", "5"}));
+    CHECK_FALSE(parse({"--redraw-every-ms", "100"}));
+    CHECK_FALSE(parse({"--assert-input-to-paint-under-ms", "8"}));
+    CHECK_FALSE(parse({"--assert-within-budget-percent", "99"}));
+    CHECK(parse({"--inject-input", "5", "--inject-interval-ms", "50"}));
+    CHECK_FALSE(parse({"--inject-interval-ms", "50"}));
+    CHECK_FALSE(parse({"--input-sampling", "sideways"}));
+    CHECK_FALSE(parse({"--offscreen", "--inject-input", "5"}));
 }

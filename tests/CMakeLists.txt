@@ -113,6 +113,30 @@ set_tests_properties(smoke.cadence_gate PROPERTIES
         RESOURCE_LOCK gpu)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.cadence_gate)
 
+# ---------------------------------------------------------------------------
+# Frame scheduler (#8), in the real loop. All local/self-hosted, like the gates above.
+# ---------------------------------------------------------------------------
+add_test(NAME smoke.idle_draws_nothing
+        COMMAND stackide --idle-ms 2000)
+add_test(NAME smoke.timed_redraw
+        COMMAND stackide --idle-ms 2000 --redraw-every-ms 100)
+add_test(NAME smoke.animation_within_budget
+        COMMAND stackide --frames 600 --assert-within-budget-percent 99)
+# On demand and at a fast typing speed, as typing into an idle editor would be. Synthetic
+# input skips the OS and the compositor, so this is the time STACK itself takes, not what a
+# keyboard would see. Faster input, or an animation, also waits for the display's next
+# refresh, which this target doesn't cover: see docs/hardware-environment.md.
+add_test(NAME smoke.input_to_paint
+        COMMAND stackide --inject-input 100 --inject-interval-ms 50 --assert-input-to-paint-under-ms 8)
+add_test(NAME smoke.late_input_beats_naive
+        COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/compare_input_sampling.sh" "$<TARGET_FILE:stackide>")
+set_tests_properties(
+        smoke.idle_draws_nothing smoke.timed_redraw smoke.animation_within_budget smoke.input_to_paint
+        smoke.late_input_beats_naive
+        PROPERTIES
+        LABELS "smoke;gpu;display"
+        RESOURCE_LOCK gpu)
+
 # The stall detector has to be wired into the real loop, not just work in isolation.
 add_test(NAME smoke.stall_detected
         COMMAND sh -c "d=$(mktemp -d '${CMAKE_CURRENT_BINARY_DIR}/logs-check.XXXXXX') && STACKIDE_LOG_DIR=$d '$<TARGET_FILE:stackide>' --frames 5 --inject-stall-ms 50 --timeout-ms 10000 && grep -q 'main loop stall.*injected stall.*run_windowed.cpp' $d/stackide.log")
@@ -219,6 +243,7 @@ add_executable(stackide_unit_tests
         unit/test_log_compile_level.cpp
         unit/test_options.cpp
         unit/test_percentile.cpp
+        unit/test_sample_window.cpp
         unit/test_stall_detector.cpp
         unit/test_worker_pool.cpp)
 target_link_libraries(stackide_unit_tests PRIVATE
@@ -227,7 +252,7 @@ add_test(NAME unit COMMAND stackide_unit_tests)
 set_tests_properties(unit PROPERTIES LABELS "unit" TIMEOUT ${STACKIDE_UNIT_TIMEOUT})
 
 # Uses SDL's dummy video backend, so it needs no display or GPU and can run under TSan.
-add_executable(stackide_main_loop_tests platform/test_main_loop.cpp)
+add_executable(stackide_main_loop_tests platform/test_frame_scheduler.cpp platform/test_main_loop.cpp)
 target_link_libraries(stackide_main_loop_tests PRIVATE
         stackide_core stackide_platform SDL3::SDL3 stackide_warnings Catch2::Catch2WithMain)
 add_test(NAME unit.main_loop COMMAND stackide_main_loop_tests)

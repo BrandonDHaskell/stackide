@@ -165,6 +165,13 @@ namespace stackide::render
         SDL_GPUCopyPass* pass_;
     };
 
+    struct SwapchainTarget
+    {
+        SDL_GPUTexture* texture = nullptr; // nullptr if the window is minimized or occluded
+        Uint32 width = 0;
+        Uint32 height = 0;
+    };
+
     class CommandBuffer
     {
     public:
@@ -184,9 +191,8 @@ namespace stackide::render
         ~CommandBuffer();
 
         // Blocks until a swapchain texture is free, which under vsync is where the wait for
-        // the display happens. Empty on failure. Holds nullptr if the window is minimized
-        // or occluded, which isn't an error: there is just nothing to draw to.
-        [[nodiscard]] std::optional<SDL_GPUTexture*> wait_for_swapchain_texture(const Swapchain& swapchain);
+        // the display happens. Empty on failure.
+        [[nodiscard]] std::optional<SwapchainTarget> wait_for_swapchain_texture(const Swapchain& swapchain);
 
         [[nodiscard]] std::optional<RenderPass> begin_render_pass(SDL_GPUTexture* target, SDL_FColor clear);
         [[nodiscard]] std::optional<CopyPass> begin_copy_pass();

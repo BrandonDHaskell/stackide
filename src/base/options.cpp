@@ -1,5 +1,6 @@
 #include <stackide/base/options.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <print>
@@ -9,6 +10,9 @@ namespace stackide
 {
     namespace
     {
+
+        // Below this, an idle check would mostly measure the window appearing.
+        constexpr int kMinIdleMs = 1000;
 
         bool parse_int(std::string_view text, int& out)
         {
@@ -155,6 +159,135 @@ namespace stackide
             return true;
         }
 
+        bool parse_input_sampling(int argc, char** argv, int& i, Options& out)
+        {
+            if (i + 1 >= argc)
+            {
+                std::println(stderr, "missing value for --input-sampling");
+                return false;
+            }
+            const std::string_view value{argv[++i]};
+            if (value == "late")
+            {
+                out.input_sampling = InputSampling::Late;
+            }
+            else if (value == "naive")
+            {
+                out.input_sampling = InputSampling::Naive;
+            }
+            else
+            {
+                std::println(stderr, "invalid value for --input-sampling: {}", value);
+                return false;
+            }
+            return true;
+        }
+
+        bool is_scheduler_flag(std::string_view arg)
+        {
+            return arg == "--idle-ms" || arg == "--redraw-every-ms" || arg == "--inject-input" ||
+                arg == "--inject-interval-ms" || arg == "--input-sampling" ||
+                arg == "--assert-input-to-paint-under-ms" || arg == "--assert-within-budget-percent";
+        }
+
+        bool parse_scheduler_flag(int argc, char** argv, int& i, std::string_view arg, Options& out)
+        {
+            const auto positive_int = [](int v) { return v > 0; };
+            const auto positive_double = [](double v) { return v > 0.0; };
+
+            if (arg == "--idle-ms")
+            {
+                return next_int_arg(argc, argv, i, arg, positive_int, out.idle_ms);
+            }
+            if (arg == "--redraw-every-ms")
+            {
+                return next_int_arg(argc, argv, i, arg, positive_int, out.redraw_every_ms);
+            }
+            if (arg == "--inject-input")
+            {
+                return next_int_arg(argc, argv, i, arg, positive_int, out.inject_input);
+            }
+            if (arg == "--inject-interval-ms")
+            {
+                return next_int_arg(argc, argv, i, arg, positive_int, out.inject_interval_ms);
+            }
+            if (arg == "--input-sampling")
+            {
+                return parse_input_sampling(argc, argv, i, out);
+            }
+
+            double value = 0.0;
+            const bool ok = next_double_arg(argc, argv, i, arg, positive_double, value);
+            if (arg == "--assert-input-to-paint-under-ms")
+            {
+                out.assert_input_to_paint_under_ms = value;
+            }
+            else
+            {
+                out.assert_within_budget_percent = value;
+            }
+            return ok;
+        }
+
+        bool validate_scheduler_flags(const Options& out)
+        {
+            const bool any = out.idle_ms > 0 || out.redraw_every_ms > 0 || out.inject_input > 0 ||
+                out.input_sampling != InputSampling::Late || out.assert_input_to_paint_under_ms ||
+                out.assert_within_budget_percent;
+            if (any && out.mode != Mode::Windowed)
+            {
+                std::println(stderr, "the frame scheduler test flags require windowed mode");
+                return false;
+            }
+            if (out.idle_ms > 0 && (out.frames > 0 || out.inject_input > 0))
+            {
+                std::println(stderr, "--idle-ms can't be combined with --frames or --inject-input");
+                return false;
+            }
+            if (out.idle_ms > 0 && out.idle_ms < kMinIdleMs)
+            {
+                std::println(stderr, "--idle-ms must be at least {}", kMinIdleMs);
+                return false;
+            }
+            if (out.redraw_every_ms > 0 && out.idle_ms == 0)
+            {
+                std::println(stderr, "--redraw-every-ms requires --idle-ms");
+                return false;
+            }
+            if (out.inject_interval_ms > 0 && out.inject_input == 0)
+            {
+                std::println(stderr, "--inject-interval-ms requires --inject-input");
+                return false;
+            }
+            if (out.assert_input_to_paint_under_ms && out.inject_input == 0)
+            {
+                std::println(stderr, "--assert-input-to-paint-under-ms requires --inject-input");
+                return false;
+            }
+            if (out.assert_within_budget_percent && out.frames == 0)
+            {
+                std::println(stderr, "--assert-within-budget-percent requires --frames");
+                return false;
+            }
+            return true;
+        }
+
+        // Only a run with an end needs a deadline: an editor waiting for its user doesn't.
+        void apply_default_timeout(Options& out)
+        {
+            if (out.frames > 0)
+            {
+                out.timeout_ms = kDefaultTimeoutMs + (static_cast<std::uint64_t>(out.frames) * kTimeoutMsPerFrame);
+            }
+            else if (out.inject_input > 0)
+            {
+                // Twice the interval, because injected events are spread around it.
+                const auto per_event =
+                    std::max<std::uint64_t>(kTimeoutMsPerFrame, static_cast<std::uint64_t>(out.inject_interval_ms) * 2);
+                out.timeout_ms = kDefaultTimeoutMs + (static_cast<std::uint64_t>(out.inject_input) * per_event);
+            }
+        }
+
         bool validate_gate_flags(const Options& out)
         {
             if (out.assert_p99_under_ms && (out.mode != Mode::Windowed || out.present_mode != PresentMode::Immediate))
@@ -179,6 +312,9 @@ namespace stackide
                      "[--timeout-ms N] [--present-mode vsync|mailbox|immediate] [--video-driver wayland|x11] "
                      "[--assert-p99-under-ms MS] [--assert-max-dropped-frames N] "
                      "[--resize-after-frames N --resize-width W --resize-height H] "
+                     "[--idle-ms N [--redraw-every-ms N]] [--inject-input N [--inject-interval-ms N]] "
+                     "[--input-sampling late|naive] "
+                     "[--assert-input-to-paint-under-ms MS] [--assert-within-budget-percent P] "
                      "[--inject-stall-ms N] [--allow-skip] [--gpu-debug [--require-validation]]");
     }
 
@@ -187,6 +323,7 @@ namespace stackide
         const auto non_negative = [](int v) { return v >= 0; };
         const auto positive_int = [](int v) { return v > 0; };
         const auto positive_double = [](double v) { return v > 0.0; };
+        bool timeout_given = false;
 
         for (int i = 1; i < argc; ++i)
         {
@@ -230,6 +367,7 @@ namespace stackide
                 int value = 0;
                 ok = next_int_arg(argc, argv, i, arg, non_negative, value);
                 out.timeout_ms = static_cast<std::uint64_t>(value);
+                timeout_given = true;
             }
             else if (arg == "--assert-max-dropped-frames")
             {
@@ -259,6 +397,10 @@ namespace stackide
             {
                 ok = next_int_arg(argc, argv, i, arg, positive_int, out.resize_height);
             }
+            else if (is_scheduler_flag(arg))
+            {
+                ok = parse_scheduler_flag(argc, argv, i, arg, out);
+            }
             else
             {
                 std::println(stderr, "unknown argument: {}", arg);
@@ -271,7 +413,12 @@ namespace stackide
             }
         }
 
-        return validate_resize_flags(out) && validate_gate_flags(out) && validate_gpu_flags(out);
+        if (!timeout_given)
+        {
+            apply_default_timeout(out);
+        }
+        return validate_resize_flags(out) && validate_gate_flags(out) && validate_gpu_flags(out) &&
+            validate_scheduler_flags(out);
     }
 
 } // namespace stackide

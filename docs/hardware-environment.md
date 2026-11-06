@@ -118,6 +118,9 @@ between worker trees.
 - Input to paint: under 8 ms, measured independently of refresh rate, from the
   OS event timestamp to the return of `SDL_SubmitGPUCommandBuffer`. Latency as
   displayed adds the wait for the next vblank and is reported separately.
+  The target holds for input into an idle window. Input that arrives while a frame is
+  already waiting on the display, as during an animation, also waits for the next refresh,
+  so there it's bounded by one refresh interval instead.
 
 ## How these are validated
 
@@ -127,8 +130,8 @@ constant is an assumption, not a criterion.
 | Constant | Check | Status |
 |---|---|---|
 | Editor-only floor | RSS assertion in a smoke test | not built |
-| Frame budget | frame-time histogram, p99 gate | not built |
-| Input to paint | instrumented event-to-submit timestamp | not built |
+| Frame budget | frame-time percentiles, `smoke.animation_within_budget` gate | built |
+| Input to paint | instrumented event-to-submit timestamp, `smoke.input_to_paint` gate | built, synthetic input only |
 | `lsp_rss_estimate` | measured at runtime, logged | not built |
 
 ## Decision log

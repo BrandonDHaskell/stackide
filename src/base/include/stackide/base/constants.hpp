@@ -22,6 +22,9 @@ namespace stackide
     // CTest convention for "skipped" (see SKIP_RETURN_CODE).
     inline constexpr int kExitSkip = 77;
 
+    // For a bounded run: the base, and an allowance per frame that a 20 Hz display could
+    // meet, so that a run's own length can't make it time out on a slow display.
     inline constexpr std::uint64_t kDefaultTimeoutMs = 10'000;
+    inline constexpr std::uint64_t kTimeoutMsPerFrame = 50;
 
 } // namespace stackide
