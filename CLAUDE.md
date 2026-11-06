@@ -24,6 +24,11 @@ Never invoke compilers directly. Always use presets.
 `ci-gcc` and `ci-clang` are test presets only. They use the `gcc` and `clang`
 builds, exclude display tests, and treat a GPU skip as a failure.
 
+Sanitizers: `gcc-asan`, `clang-asan`, `gcc-tsan` and `clang-tsan` are configure and
+build presets, tested with `ctest --preset ci-<name>`. TSan runs unit tests only.
+
+Lint: `cmake --build --preset clang --target format-check tidy`.
+
 Verify in the container before pushing. This builds in a copy inside the
 container, because a CMake cache can't be shared between host and container paths:
 

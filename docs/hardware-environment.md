@@ -37,7 +37,7 @@ It should degrade to a usable editor, not fail.
 - **Primary:** Linux x86-64, Debian 13 and equivalents
 - **Secondary:** macOS ARM64
 - **Deferred:** Windows, stated publicly rather than half-supported
-- **Toolchain:** GCC 16 or Clang 21, C++26, with shims where library support lags
+- **Toolchain:** GCC 16 or Clang 23, C++26, with shims where library support lags
 - **SIMD baseline:** AVX2 and NEON. Not AVX-512: absent on most consumer parts
   and it downclocks on several server ones. Prefer `std::simd` where the
   library supports it, intrinsics only where it does not.
@@ -115,7 +115,9 @@ between worker trees.
 - Working budget: 16 ms, the 60 Hz refresh interval, treated as the floor
   assumption. On a 120 Hz display the budget is 8.3 ms and the same code path
   must fit it.
-- Input to paint: under 8 ms, measured independently of refresh rate.
+- Input to paint: under 8 ms, measured independently of refresh rate, from the
+  OS event timestamp to the return of `SDL_SubmitGPUCommandBuffer`. Latency as
+  displayed adds the wait for the next vblank and is reported separately.
 
 ## How these are validated
 
@@ -126,7 +128,7 @@ constant is an assumption, not a criterion.
 |---|---|---|
 | Editor-only floor | RSS assertion in a smoke test | not built |
 | Frame budget | frame-time histogram, p99 gate | not built |
-| Input to paint | instrumented event-to-present timestamp | not built |
+| Input to paint | instrumented event-to-submit timestamp | not built |
 | `lsp_rss_estimate` | measured at runtime, logged | not built |
 
 ## Decision log
@@ -143,3 +145,9 @@ constant is an assumption, not a criterion.
   and a pool clamped at 4, which is unsatisfiable.
 - **2026-09-20:** Cache line made per-architecture. A single 64-byte assertion
   contradicts macOS ARM64 as a supported secondary platform.
+- **2026-11-05:** Clang requirement raised from 21 to 23, the version actually
+  built and tested. Supporting both would limit usable C++26 features for no
+  supported platform's benefit.
+- **2026-11-05:** Input to paint ends at submit rather than present. Where an
+  input lands in the refresh interval is not a property of the code, and ending
+  at present would make the number depend on refresh rate.
