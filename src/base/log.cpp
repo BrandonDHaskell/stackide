@@ -130,7 +130,7 @@ namespace stackide
                 const auto timestamp = slot.words[0].load(std::memory_order_acquire);
                 const auto site = slot.words[1].load(std::memory_order_acquire);
                 const auto decoder = slot.words[2].load(std::memory_order_acquire);
-                const auto size = slot.words[3].load(std::memory_order_acquire);
+                const std::size_t size = slot.words[3].load(std::memory_order_acquire);
                 // A torn size is only ever used to bound this copy, and is clamped first.
                 const auto words = std::min((size + kWordBytes - 1) / kWordBytes, out.payload.size());
                 for (std::size_t i = 0; i < words; ++i)
@@ -599,7 +599,8 @@ namespace stackide
             struct sigaction action{};
             action.sa_handler = crash_handler;
             action.sa_flags = SA_NODEFER;
-            ::sigemptyset(&action.sa_mask);
+            // Unqualified, and with the result discarded, because macOS defines this as a macro.
+            static_cast<void>(sigemptyset(&action.sa_mask));
             for (std::size_t i = 0; i < kCrashSignals.size(); ++i)
             {
                 ::sigaction(kCrashSignals.at(i), &action, &state.previous_handlers.at(i));
