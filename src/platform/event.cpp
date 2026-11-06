@@ -34,6 +34,11 @@ namespace stackide::platform
                     out.type = EventType::Quit;
                     return true;
                 }
+                if (event.key.key == SDLK_F12)
+                {
+                    out.type = EventType::ToggleFrameGraph;
+                    return true;
+                }
                 out.type = EventType::Input;
                 return true;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:

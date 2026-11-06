@@ -1,6 +1,7 @@
 #include <stackide/core/worker_pool.hpp>
 
 #include <stackide/base/log.hpp>
+#include <stackide/profile/profile.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -21,6 +22,7 @@ namespace stackide
 
         void run_task(const WorkerPool::Task& task, const std::stop_token& token)
         {
+            STACKIDE_ZONE("worker task");
             try
             {
                 task(token);
@@ -51,9 +53,9 @@ namespace stackide
     WorkerPool::WorkerPool(const WorkerPoolConfig& config) :
         interactive_(config.queue_capacity), background_(config.queue_capacity)
     {
-        start_threads(config.interactive_threads, interactive_);
+        start_threads(config.interactive_threads, interactive_, "interactive worker");
         start_threads(config.background_threads != 0 ? config.background_threads : default_background_threads(),
-                      background_);
+                      background_, "background worker");
     }
 
     WorkerPool::~WorkerPool()
@@ -69,13 +71,15 @@ namespace stackide
         return lane == Lane::Interactive ? interactive_ : background_;
     }
 
-    void WorkerPool::start_threads(std::size_t count, BoundedQueue<Item>& queue)
+    void WorkerPool::start_threads(std::size_t count, BoundedQueue<Item>& queue, const char* thread_name)
     {
         for (std::size_t i = 0; i < count; ++i)
         {
             threads_.emplace_back(
-                [&queue](const std::stop_token& thread_stop)
+                [&queue, thread_name](const std::stop_token& thread_stop)
                 {
+                    static_cast<void>(thread_name); // unused when profiling is compiled out
+                    STACKIDE_THREAD_NAME(thread_name);
                     while (std::optional<Item> item = queue.pop(thread_stop))
                     {
                         // Shutting the pool down has to stop a running task too.

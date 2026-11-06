@@ -243,6 +243,7 @@ add_executable(stackide_unit_tests
         unit/test_log_compile_level.cpp
         unit/test_options.cpp
         unit/test_percentile.cpp
+        unit/test_profile.cpp
         unit/test_sample_window.cpp
         unit/test_stall_detector.cpp
         unit/test_worker_pool.cpp)
@@ -287,6 +288,15 @@ set_tests_properties(gpu.upload_ring PROPERTIES
         RESOURCE_LOCK gpu
         SKIP_REGULAR_EXPRESSION "skipped: no GPU device")
 
+add_executable(stackide_frame_graph_tests gpu/test_frame_graph.cpp)
+target_link_libraries(stackide_frame_graph_tests PRIVATE
+        stackide_render stackide_platform stackide_profile SDL3::SDL3 stackide_warnings Catch2::Catch2WithMain)
+add_test(NAME gpu.frame_graph COMMAND stackide_frame_graph_tests)
+set_tests_properties(gpu.frame_graph PROPERTIES
+        LABELS "gpu"
+        RESOURCE_LOCK gpu
+        SKIP_REGULAR_EXPRESSION "skipped: no GPU device")
+
 # The validation gate has to be able to fail: a shader SDL_GPU can't use, on a real
 # device, must make a --gpu-debug result a failure. Its own binary because the upload
 # ring test must set SDL's memory functions before anything else touches SDL.
@@ -301,6 +311,40 @@ set_tests_properties(gpu.validation_gate PROPERTIES
         LABELS "gpu"
         RESOURCE_LOCK gpu
         SKIP_REGULAR_EXPRESSION "skipped: validation layers not installed")
+
+# ---------------------------------------------------------------------------
+# Profiler (#11). The headless report needs only a GPU, so it runs in CI. The rest draw to a
+# window, so they stay local.
+# ---------------------------------------------------------------------------
+add_test(NAME smoke.profile_report_offscreen
+        COMMAND "${CMAKE_COMMAND}" -DBINARY=$<TARGET_FILE:stackide> -DFRAMES=50
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/profile-offscreen.json" "-DARGS=--offscreen"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_profile_report.cmake")
+set_tests_properties(smoke.profile_report_offscreen PROPERTIES
+        LABELS "smoke;gpu"
+        RESOURCE_LOCK gpu
+        TIMEOUT ${STACKIDE_UNIT_TIMEOUT})
+
+add_test(NAME smoke.profile_report_windowed
+        COMMAND "${CMAKE_COMMAND}" -DBINARY=$<TARGET_FILE:stackide> -DFRAMES=100
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/profile-windowed.json" "-DARGS="
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_profile_report.cmake")
+add_test(NAME smoke.frame_graph_cost
+        COMMAND stackide --frames 300 --show-frame-graph --assert-frame-graph-under-ms 0.1)
+# The editor-only target from docs/hardware-environment.md.
+add_test(NAME smoke.editor_memory_floor
+        COMMAND stackide --profile-frames 100 --profile-output "${CMAKE_CURRENT_BINARY_DIR}/profile-memory.json"
+                --assert-peak-rss-under-mb 1024)
+set_tests_properties(smoke.profile_report_windowed smoke.frame_graph_cost smoke.editor_memory_floor PROPERTIES
+        LABELS "smoke;gpu;display"
+        RESOURCE_LOCK gpu)
+
+# With profiling off, zones must cost nothing: no Tracy code can be in the binary at all.
+if(NOT STACKIDE_PROFILING)
+    add_test(NAME build.no_tracy_when_off
+            COMMAND sh -c "nm -C '$<TARGET_FILE:stackide>' | grep -qi 'tracy' && exit 1 || exit 0")
+    set_tests_properties(build.no_tracy_when_off PROPERTIES LABELS "build")
+endif()
 
 # ---------------------------------------------------------------------------
 # Log call cost (#152). The gate only means something in an optimized, uninstrumented
@@ -326,7 +370,8 @@ if(STACKIDE_SANITIZE MATCHES "address")
     get_filename_component(STACKIDE_COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     find_program(STACKIDE_LLVM_SYMBOLIZER llvm-symbolizer HINTS "${STACKIDE_COMPILER_DIR}")
 
-    set(STACKIDE_DRAWING_TESTS smoke.offscreen smoke.offscreen_validated gpu.upload_ring gpu.validation_gate)
+    set(STACKIDE_DRAWING_TESTS smoke.offscreen smoke.offscreen_validated smoke.profile_report_offscreen gpu.upload_ring
+            gpu.validation_gate gpu.frame_graph)
     set_property(TEST ${STACKIDE_DRAWING_TESTS} APPEND PROPERTY
             ENVIRONMENT_MODIFICATION "ASAN_OPTIONS=string_append:fast_unwind_on_malloc=0:")
     if(STACKIDE_LLVM_SYMBOLIZER)

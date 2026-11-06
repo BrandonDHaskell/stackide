@@ -30,6 +30,12 @@ namespace stackide::platform
         return size;
     }
 
+    bool Window::occluded() const
+    {
+        constexpr SDL_WindowFlags kNotVisible = SDL_WINDOW_OCCLUDED | SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN;
+        return (SDL_GetWindowFlags(window_.get()) & kNotVisible) != 0;
+    }
+
     float Window::display_scale() const { return SDL_GetWindowDisplayScale(window_.get()); }
 
     float Window::refresh_hz() const

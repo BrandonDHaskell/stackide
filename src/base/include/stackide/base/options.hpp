@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace stackide
 {
@@ -60,6 +61,14 @@ namespace stackide
         int inject_interval_ms = 0; // about this far apart; 0 means faster than a refresh
         std::optional<double> assert_input_to_paint_under_ms; // p99, requires inject_input
         std::optional<double> assert_within_budget_percent; // requires frames
+
+        // Renders this many frames, windowed or offscreen, then writes a JSON summary.
+        int profile_frames = 0;
+        std::string profile_output = "stackide-profile.json";
+        std::optional<int> assert_peak_rss_under_mb; // requires profile_frames
+
+        bool show_frame_graph = false; // requires windowed mode
+        std::optional<double> assert_frame_graph_under_ms; // p99, requires show_frame_graph
 
         // Makes one main-loop iteration this slow, to prove stalls get caught. Requires
         // windowed mode.

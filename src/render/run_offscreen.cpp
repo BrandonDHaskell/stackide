@@ -4,6 +4,9 @@
 #include <stackide/base/log.hpp>
 #include <stackide/base/scope_exit.hpp>
 #include <stackide/platform/video.hpp>
+#include <stackide/profile/frame_metrics.hpp>
+#include <stackide/profile/profile.hpp>
+#include <stackide/profile/profile_report.hpp>
 #include <stackide/render/gpu.hpp>
 #include <stackide/render/quad_resources.hpp>
 #include <stackide/render/render_constants.hpp>
@@ -11,7 +14,9 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
@@ -43,6 +48,38 @@ namespace stackide
                                offset, px[0], px[1], px[2], px[3], expected.at(0), expected.at(1), expected.at(2),
                                expected.at(3));
             return false;
+        }
+
+        // Times frames the way CI can: fully rendered and waited on, with nothing to present to.
+        bool measure_frames(const Options& opts, const render::Device& device, const render::Texture& color,
+                            const QuadResources& quad, FrameMetrics& metrics)
+        {
+            for (int i = 0; i < opts.profile_frames; ++i)
+            {
+                STACKIDE_ZONE("offscreen frame");
+                const auto start = std::chrono::steady_clock::now();
+                std::optional<render::CommandBuffer> commands = render::CommandBuffer::acquire(device);
+                if (!commands)
+                {
+                    return false;
+                }
+                {
+                    std::optional<render::RenderPass> pass = commands->begin_render_pass(color.get(), clear_color());
+                    if (!pass)
+                    {
+                        return false;
+                    }
+                    draw_quad(*commands, *pass, quad, {1.0F, 1.0F});
+                }
+                if (!commands->submit_and_wait())
+                {
+                    return false;
+                }
+                const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
+                metrics.add_frame(elapsed.count(), -1.0);
+                STACKIDE_FRAME();
+            }
+            return true;
         }
 
         int render_and_verify(const Options& opts)
@@ -91,6 +128,12 @@ namespace stackide
             tb_info.size = kBufferSize;
             const render::TransferBuffer transfer = device->create_transfer_buffer(tb_info, "readback buffer");
             if (!transfer)
+            {
+                return EXIT_FAILURE;
+            }
+
+            FrameMetrics metrics{opts.profile_frames > 0 ? static_cast<std::size_t>(opts.profile_frames) : 1};
+            if (!measure_frames(opts, *device, color, *quad, metrics))
             {
                 return EXIT_FAILURE;
             }
@@ -169,6 +212,23 @@ namespace stackide
 
             STACKIDE_LOG_INFO(LogCategory::Render, "offscreen: quad verified at {}x{} (4 UV checks)", kOffscreenWidth,
                               kOffscreenHeight);
+
+            if (opts.profile_frames > 0)
+            {
+                const bool reported = finish_profile_run(opts,
+                                                         ProfileReport{
+                                                             .mode = "offscreen",
+                                                             .frames_presented = opts.profile_frames,
+                                                             .frame_budget_ms = kFallbackFrameBudgetMs,
+                                                             .missed_frames = 0,
+                                                             .frame = metrics.frame_summary(),
+                                                             .input_to_paint = metrics.input_to_paint_summary(),
+                                                         });
+                if (!reported)
+                {
+                    return EXIT_FAILURE;
+                }
+            }
             return EXIT_SUCCESS;
         }
 

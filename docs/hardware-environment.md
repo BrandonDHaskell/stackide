@@ -129,7 +129,7 @@ constant is an assumption, not a criterion.
 
 | Constant | Check | Status |
 |---|---|---|
-| Editor-only floor | RSS assertion in a smoke test | not built |
+| Editor-only floor | peak RSS gate in `smoke.editor_memory_floor` | built |
 | Frame budget | frame-time percentiles, `smoke.animation_within_budget` gate | built |
 | Input to paint | instrumented event-to-submit timestamp, `smoke.input_to_paint` gate | built, synthetic input only |
 | `lsp_rss_estimate` | measured at runtime, logged | not built |

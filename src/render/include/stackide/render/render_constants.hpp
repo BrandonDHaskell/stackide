@@ -11,6 +11,11 @@ namespace stackide
     inline constexpr int kWindowWidth = 1280;
     inline constexpr int kWindowHeight = 800;
 
+    // The working budget and the input-to-paint target from docs/hardware-environment.md. The
+    // budget is for when there's no display to derive one from.
+    inline constexpr double kFallbackFrameBudgetMs = 16.0;
+    inline constexpr double kInputToPaintTargetMs = 8.0;
+
     inline constexpr int kOffscreenWidth = 64;
     inline constexpr int kOffscreenHeight = 64;
 

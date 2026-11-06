@@ -56,13 +56,21 @@ if(STACKIDE_SANITIZE)
 endif()
 
 add_library(stackide_profile STATIC
+        src/profile/frame_metrics.cpp
+        src/profile/memory.cpp
         src/profile/percentile.cpp
+        src/profile/profile_report.cpp
         src/profile/stall_detector.cpp
+        src/profile/include/stackide/profile/frame_metrics.hpp
+        src/profile/include/stackide/profile/memory.hpp
+        src/profile/include/stackide/profile/profile.hpp
+        src/profile/include/stackide/profile/profile_report.hpp
         src/profile/include/stackide/profile/percentile.hpp
         src/profile/include/stackide/profile/sample_window.hpp
         src/profile/include/stackide/profile/stall_detector.hpp
 )
 target_include_directories(stackide_profile PUBLIC src/profile/include)
+target_compile_definitions(stackide_profile PUBLIC STACKIDE_PROFILING=$<BOOL:${STACKIDE_PROFILING}>)
 target_link_libraries(stackide_profile
         PUBLIC stackide_base Tracy::TracyClient
         PRIVATE stackide_warnings)
@@ -79,7 +87,7 @@ add_library(stackide_core STATIC
 target_include_directories(stackide_core PUBLIC src/core/include)
 target_link_libraries(stackide_core
         PUBLIC stackide_base
-        PRIVATE stackide_warnings)
+        PRIVATE stackide_profile stackide_warnings)
 
 # The only module besides render that may use SDL. Its public headers don't include it.
 add_library(stackide_platform STATIC
@@ -100,11 +108,13 @@ target_link_libraries(stackide_platform
         PRIVATE SDL3::SDL3 stackide_warnings)
 
 add_library(stackide_render STATIC
+        src/render/frame_graph.cpp
         src/render/gpu.cpp
         src/render/quad_resources.cpp
         src/render/run_offscreen.cpp
         src/render/run_windowed.cpp
         src/render/upload_ring.cpp
+        src/render/include/stackide/render/frame_graph.hpp
         src/render/include/stackide/render/gpu.hpp
         src/render/include/stackide/render/modes.hpp
         src/render/include/stackide/render/quad_resources.hpp
@@ -115,11 +125,13 @@ target_include_directories(stackide_render
         PUBLIC src/render/include
         PRIVATE "${STACKIDE_SHADER_INCLUDE_DIR}")
 target_link_libraries(stackide_render
-        PUBLIC stackide_base stackide_core stackide_platform
-        PRIVATE SDL3::SDL3 stackide_profile stackide_warnings)
+        PUBLIC stackide_base stackide_core stackide_platform stackide_profile
+        PRIVATE SDL3::SDL3 stackide_warnings)
 
 stackide_add_shader(stackide_render shaders/quad.vert.hlsl vert kQuadVertSpv)
 stackide_add_shader(stackide_render shaders/quad.frag.hlsl frag kQuadFragSpv)
+stackide_add_shader(stackide_render shaders/frame_graph.vert.hlsl vert kFrameGraphVertSpv)
+stackide_add_shader(stackide_render shaders/frame_graph.frag.hlsl frag kFrameGraphFragSpv)
 
 add_executable(stackide src/app/main.cpp)
 target_link_libraries(stackide PRIVATE stackide_platform stackide_render stackide_warnings)

@@ -87,7 +87,7 @@ namespace stackide
         };
 
         BoundedQueue<Item>& queue_for(Lane lane) noexcept;
-        void start_threads(std::size_t count, BoundedQueue<Item>& queue);
+        void start_threads(std::size_t count, BoundedQueue<Item>& queue, const char* thread_name);
 
         BoundedQueue<Item> interactive_;
         BoundedQueue<Item> background_;

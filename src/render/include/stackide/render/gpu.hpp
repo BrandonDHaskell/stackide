@@ -140,6 +140,7 @@ namespace stackide::render
         void bind_index_buffer_16(const Buffer& buffer) noexcept;
         void bind_fragment_texture(const Texture& texture, const Sampler& sampler) noexcept;
         void draw_indexed(Uint32 index_count) noexcept;
+        void draw(Uint32 vertex_count) noexcept;
 
     private:
         SDL_GPURenderPass* pass_;
@@ -167,7 +168,7 @@ namespace stackide::render
 
     struct SwapchainTarget
     {
-        SDL_GPUTexture* texture = nullptr; // nullptr if the window is minimized or occluded
+        SDL_GPUTexture* texture = nullptr; // nullptr if none is ready
         Uint32 width = 0;
         Uint32 height = 0;
     };
@@ -190,9 +191,10 @@ namespace stackide::render
         // acquired, so it submits in that case instead.
         ~CommandBuffer();
 
-        // Blocks until a swapchain texture is free, which under vsync is where the wait for
-        // the display happens. Empty on failure.
-        [[nodiscard]] std::optional<SwapchainTarget> wait_for_swapchain_texture(const Swapchain& swapchain);
+        // Never waits on the GPU or the display: holds a null texture if none is ready yet, and
+        // empty only on failure. A blocking wait isn't safe here, because a compositor stops
+        // presenting to a hidden or locked surface, and that wait would then never end.
+        [[nodiscard]] std::optional<SwapchainTarget> try_acquire_swapchain_texture(const Swapchain& swapchain);
 
         [[nodiscard]] std::optional<RenderPass> begin_render_pass(SDL_GPUTexture* target, SDL_FColor clear);
         [[nodiscard]] std::optional<CopyPass> begin_copy_pass();

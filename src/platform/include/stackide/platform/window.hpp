@@ -24,6 +24,9 @@ namespace stackide::platform
         static std::optional<Window> create(const std::string& title, int width, int height);
 
         [[nodiscard]] PixelSize size_in_pixels() const;
+        // Whether nothing can be presented right now: minimized, hidden, or suspended by the
+        // compositor, as when the screen is locked. Presenting then can block until it ends.
+        [[nodiscard]] bool occluded() const;
         [[nodiscard]] float display_scale() const;
         // Of the display the window is on now, or 0 if unknown.
         [[nodiscard]] float refresh_hz() const;

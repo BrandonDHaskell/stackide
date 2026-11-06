@@ -86,6 +86,11 @@ call `log_flush()` before printing direct output that must follow earlier log li
   testing what CI will see; mount the working tree directly when iterating.
 - Always pass `-u "$(id -u):$(id -g)"` to docker run with a mounted tree,
   or you get root-owned files in your source tree.
+- With vsync, present blocks while the screen is locked, because the compositor stops
+  showing the surface, and KWin doesn't report it as occluded. Display tests hang or time
+  out then, and the main loop stops until it's unlocked. Accepted for now: nothing should
+  render while the system is locked or asleep, and a later system-aware phase will detect
+  those states and stop presenting. Don't work around this with a present mode change.
 - SDL installs no Vulkan debug messenger, so validation errors never reach its log.
   `--gpu-debug` reads them from a file instead. Correct pixels don't imply valid usage:
   lavapipe renders some invalid bindings correctly.

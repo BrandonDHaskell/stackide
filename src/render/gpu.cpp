@@ -218,6 +218,8 @@ namespace stackide::render
         SDL_DrawGPUIndexedPrimitives(pass_, index_count, 1, 0, 0, 0);
     }
 
+    void RenderPass::draw(Uint32 vertex_count) noexcept { SDL_DrawGPUPrimitives(pass_, vertex_count, 1, 0, 0); }
+
     CopyPass::~CopyPass()
     {
         if (pass_ != nullptr)
@@ -276,13 +278,13 @@ namespace stackide::render
         }
     }
 
-    std::optional<SwapchainTarget> CommandBuffer::wait_for_swapchain_texture(const Swapchain& swapchain)
+    std::optional<SwapchainTarget> CommandBuffer::try_acquire_swapchain_texture(const Swapchain& swapchain)
     {
         SwapchainTarget target;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer_, swapchain.window(), &target.texture, &target.width,
-                                                   &target.height))
+        if (!SDL_AcquireGPUSwapchainTexture(command_buffer_, swapchain.window(), &target.texture, &target.width,
+                                            &target.height))
         {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_WaitAndAcquireGPUSwapchainTexture failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_AcquireGPUSwapchainTexture failed: {}", SDL_GetError());
             return std::nullopt;
         }
         acquired_swapchain_ = target.texture != nullptr;

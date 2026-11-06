@@ -8,9 +8,13 @@
 #include <stackide/platform/main_loop.hpp>
 #include <stackide/platform/video.hpp>
 #include <stackide/platform/window.hpp>
-#include <stackide/profile/percentile.hpp>
+#include <stackide/profile/frame_metrics.hpp>
+#include <stackide/profile/memory.hpp>
+#include <stackide/profile/profile.hpp>
+#include <stackide/profile/profile_report.hpp>
 #include <stackide/profile/sample_window.hpp>
 #include <stackide/profile/stall_detector.hpp>
+#include <stackide/render/frame_graph.hpp>
 #include <stackide/render/gpu.hpp>
 #include <stackide/render/quad_resources.hpp>
 #include <stackide/render/render_constants.hpp>
@@ -45,16 +49,15 @@ namespace stackide
         constexpr std::uint64_t kNanosPerMilliInt = 1'000'000;
         constexpr double kMillisPerSecond = 1000.0;
         constexpr double kPercent = 100.0;
-        constexpr double kP50 = 0.50;
-        constexpr double kP99 = 0.99;
 
         // Fixed memory for a run of any length.
         constexpr std::size_t kDefaultSampleCapacity = 4096;
-        constexpr Uint32 kOccludedFrameDelayMs = 16;
-
-        // The working budget from docs/hardware-environment.md, for when the display can't
-        // say what its refresh rate is.
-        constexpr double kFallbackFrameBudgetMs = 16.0;
+        // How long a frame waits for a swapchain texture before giving up, then how long until
+        // it tries again. A hidden or locked surface gets no textures at all, and this keeps
+        // the loop answering events meanwhile, at a rate that doesn't cost anything.
+        constexpr std::uint64_t kSwapchainPatienceMs = 100;
+        constexpr std::uint64_t kSwapchainRetryMs = 100;
+        constexpr int kSwapchainPollMs = 1;
 
         // How long an idle check lets the window appear and the compositor settle.
         constexpr std::uint64_t kIdleSettleMs = 500;
@@ -76,6 +79,7 @@ namespace stackide
             const render::Swapchain& swapchain;
             platform::Window& window;
             const QuadResources& quad;
+            const render::FrameGraph& graph;
         };
         // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
@@ -83,8 +87,7 @@ namespace stackide
         {
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
             LoopState(double budget_ms, std::size_t frame_capacity) :
-                scheduler(budget_ms), stalls(budget_ms), frame_times_ms(frame_capacity),
-                input_to_paint_ms(kDefaultSampleCapacity)
+                scheduler(budget_ms), stalls(budget_ms), metrics(frame_capacity), frame_graph_ms(kDefaultSampleCapacity)
             {
             }
 
@@ -97,8 +100,9 @@ namespace stackide
             int presented = 0;
             std::uint64_t frames_within_budget = 0;
             int exit_code = EXIT_SUCCESS;
-            SampleWindow frame_times_ms;
-            SampleWindow input_to_paint_ms;
+            FrameMetrics metrics;
+            bool show_frame_graph = false;
+            SampleWindow frame_graph_ms;
 
             // Whether the window system asked for the next frame, and how many it has asked for.
             bool frame_requested_by_event = false;
@@ -176,6 +180,11 @@ namespace stackide
                 state.next_frame_from_input = true;
                 state.scheduler.request_redraw(now);
                 break;
+            case platform::EventType::ToggleFrameGraph:
+                state.show_frame_graph = !state.show_frame_graph;
+                state.frame_requested_by_event = true;
+                state.scheduler.request_redraw(now);
+                break;
             case platform::EventType::Wakeup:
                 // Only here to end a wait: pump() drains the messages next anyway.
                 break;
@@ -206,8 +215,21 @@ namespace stackide
 
         void pump_main_loop(platform::MainLoop& loop, const platform::Window& window, LoopState& state)
         {
+            STACKIDE_ZONE("events and messages");
             loop.pump([&](const platform::Event& event) { handle_event(event, window, state); },
                       [&](const CoreToUi& message) { handle_message(message, state); });
+        }
+
+        void draw_frame_graph(const Renderer& renderer, render::CommandBuffer& commands, render::RenderPass& pass,
+                              const render::SwapchainTarget& target, LoopState& state)
+        {
+            STACKIDE_ZONE("frame graph");
+            const std::uint64_t start = platform::now_ns();
+            std::array<float, kFrameHistorySize> frames{};
+            std::array<float, kFrameHistorySize> inputs{};
+            state.metrics.normalized_history(state.scheduler.budget_ms(), kInputToPaintTargetMs, frames, inputs);
+            renderer.graph.draw(commands, pass, target.width, target.height, frames, inputs);
+            state.frame_graph_ms.add(ns_to_ms(platform::now_ns() - start));
         }
 
         struct RenderedFrame
@@ -223,6 +245,17 @@ namespace stackide
         std::optional<RenderedFrame> render_frame(const Renderer& renderer, platform::MainLoop& loop, LoopState& state,
                                                   InputSampling sampling)
         {
+            STACKIDE_ZONE("frame");
+            // Present blocks on a surface the compositor isn't showing, and would hold the whole
+            // loop there until it's shown again. So don't start a frame that can't be seen.
+            if (renderer.window.occluded())
+            {
+                state.scheduler.begin_frame(platform::now_ns());
+                std::ignore =
+                    state.scheduler.request_redraw_at(platform::now_ns() + (kSwapchainRetryMs * kNanosPerMilliInt));
+                return RenderedFrame{.presented = false, .swapchain_wait_ns = 0};
+            }
+
             state.stalls.phase("acquiring a command buffer");
             std::optional<render::CommandBuffer> commands = render::CommandBuffer::acquire(renderer.device);
             if (!commands)
@@ -230,38 +263,42 @@ namespace stackide
                 return std::nullopt;
             }
 
-            // Waiting for the display isn't work, and neither is the occluded delay below.
+            // Waiting for the display isn't work. The wait polls rather than blocks, so that
+            // events keep flowing, and so that input arriving during it still makes this frame.
             state.stalls.pause();
             const std::uint64_t wait_start = platform::now_ns();
-            const std::optional<render::SwapchainTarget> target =
-                commands->wait_for_swapchain_texture(renderer.swapchain);
-            if (!target)
+            const std::uint64_t give_up_at = wait_start + (kSwapchainPatienceMs * kNanosPerMilliInt);
+            std::optional<render::SwapchainTarget> target;
+            while (true)
             {
-                return std::nullopt;
+                target = commands->try_acquire_swapchain_texture(renderer.swapchain);
+                if (!target)
+                {
+                    return std::nullopt;
+                }
+                if (sampling == InputSampling::Late)
+                {
+                    pump_main_loop(loop, renderer.window, state);
+                }
+                if (target->texture != nullptr || state.quit || platform::now_ns() > give_up_at)
+                {
+                    break;
+                }
+                loop.wait(kSwapchainPollMs);
             }
             const std::uint64_t swapchain_wait_ns = platform::now_ns() - wait_start;
-
-            // The wait can be most of a frame, and input that arrived during it can still
-            // make this frame. Reading it now is the whole point of late sampling.
-            if (sampling == InputSampling::Late)
-            {
-                state.stalls.phase("handling late events and messages");
-                pump_main_loop(loop, renderer.window, state);
-                state.stalls.pause();
-            }
             state.scheduler.begin_frame(platform::now_ns());
 
             if (target->texture == nullptr)
             {
-                // Minimized or occluded: not an error, but no frame was presented. Whatever
-                // was asked for gets drawn when the window next becomes visible, which
-                // sends an event of its own.
-                commands->submit();
-                SDL_Delay(kOccludedFrameDelayMs);
+                // Hidden, locked, or minimized: not an error, but nothing can be presented. The
+                // command buffer cancels itself, since it never acquired a texture.
+                std::ignore =
+                    state.scheduler.request_redraw_at(platform::now_ns() + (kSwapchainRetryMs * kNanosPerMilliInt));
                 return RenderedFrame{.presented = false, .swapchain_wait_ns = swapchain_wait_ns};
             }
 
-            state.stalls.phase("recording and submitting the frame");
+            state.stalls.phase("recording the frame");
             {
                 std::optional<render::RenderPass> pass = commands->begin_render_pass(target->texture, clear_color());
                 if (!pass)
@@ -269,8 +306,19 @@ namespace stackide
                     return std::nullopt;
                 }
                 draw_quad(*commands, *pass, renderer.quad, letterbox_scale(target->width, target->height));
+                if (state.show_frame_graph)
+                {
+                    draw_frame_graph(renderer, *commands, *pass, *target, state);
+                }
             }
-            commands->submit();
+            // Separate from recording because present can block in here on the compositor, which
+            // is a very different finding from slow recording.
+            state.stalls.phase("submitting and presenting the frame");
+            {
+                STACKIDE_ZONE("submit");
+                commands->submit();
+            }
+            STACKIDE_FRAME();
 
             // A resize read late doesn't change a texture that was already acquired, so the
             // new size needs one more frame.
@@ -329,7 +377,6 @@ namespace stackide
             // back-pressure, a real cost the frame-cost gate has to see.
             const std::uint64_t excluded_ns = opts.present_mode == PresentMode::Vsync ? swapchain_wait_ns : 0;
             const double cost_ms = ns_to_ms(now - frame_start_ns - excluded_ns);
-            state.frame_times_ms.add(cost_ms);
             if (cost_ms <= state.scheduler.budget_ms())
             {
                 ++state.frames_within_budget;
@@ -347,11 +394,16 @@ namespace stackide
             state.next_frame_from_input = false;
             state.frame_requested_by_event = false;
 
+            double input_to_paint_ms = -1.0;
             if (state.pending_input_ns)
             {
-                state.input_to_paint_ms.add(ns_to_ms(now - *state.pending_input_ns));
+                input_to_paint_ms = ns_to_ms(now - *state.pending_input_ns);
                 state.pending_input_ns.reset();
+                STACKIDE_PLOT("input to paint (ms)", input_to_paint_ms);
             }
+            state.metrics.add_frame(cost_ms, input_to_paint_ms);
+            STACKIDE_PLOT("frame cost (ms)", cost_ms);
+            STACKIDE_PLOT("missed frames", state.scheduler.missed_frames());
         }
 
         // Tracks the wall clock and CPU time of the part of an --idle-ms run after the window
@@ -482,8 +534,9 @@ namespace stackide
                 }
             }
 
-            // A bounded run is the test animation: every frame asks for the next one.
-            if (opts.frames > 0)
+            // A bounded run is the test animation: every frame asks for the next one. A frame
+            // that couldn't present has already scheduled its own retry.
+            if (opts.frames > 0 && frame->presented)
             {
                 state.scheduler.request_redraw(platform::now_ns());
             }
@@ -603,7 +656,8 @@ namespace stackide
         // The input half of the exit-time summary. Returns whether its gate passed.
         bool report_input_to_paint(const Options& opts, const LoopState& state)
         {
-            if (state.input_to_paint_ms.size() == 0)
+            const MetricSummary input = state.metrics.input_to_paint_summary();
+            if (input.count == 0)
             {
                 if (opts.inject_input == 0)
                 {
@@ -613,14 +667,37 @@ namespace stackide
                 return false;
             }
 
-            const std::vector<double> sorted = state.input_to_paint_ms.sorted();
-            const double p99 = percentile(sorted, kP99);
-            std::println(stderr, "input to paint: {} frame(s), p50={:.3f} ms p99={:.3f} ms max={:.3f} ms",
-                         sorted.size(), percentile(sorted, kP50), p99, sorted.back());
-            if (opts.assert_input_to_paint_under_ms && p99 > *opts.assert_input_to_paint_under_ms)
+            std::println(stderr, "input to paint: {} frame(s), p50={:.3f} ms p95={:.3f} ms p99={:.3f} ms max={:.3f} ms",
+                         input.count, input.p50_ms, input.p95_ms, input.p99_ms, input.max_ms);
+            if (opts.assert_input_to_paint_under_ms && input.p99_ms > *opts.assert_input_to_paint_under_ms)
             {
-                STACKIDE_LOG_ERROR(LogCategory::Render, "input to paint p99 {:.3f} ms exceeds gate {:.3f} ms", p99,
-                                   *opts.assert_input_to_paint_under_ms);
+                STACKIDE_LOG_ERROR(LogCategory::Render, "input to paint p99 {:.3f} ms exceeds gate {:.3f} ms",
+                                   input.p99_ms, *opts.assert_input_to_paint_under_ms);
+                return false;
+            }
+            return true;
+        }
+
+        // The graph half of the exit-time summary. Returns whether its gate passed.
+        bool report_frame_graph(const Options& opts, const LoopState& state)
+        {
+            const MetricSummary graph = summarize(state.frame_graph_ms);
+            if (graph.count == 0)
+            {
+                if (!opts.assert_frame_graph_under_ms)
+                {
+                    return true;
+                }
+                STACKIDE_LOG_ERROR(LogCategory::Render, "the frame graph was never drawn");
+                return false;
+            }
+
+            std::println(stderr, "frame graph: {} draw(s), p50={:.4f} ms p99={:.4f} ms", graph.count, graph.p50_ms,
+                         graph.p99_ms);
+            if (opts.assert_frame_graph_under_ms && graph.p99_ms > *opts.assert_frame_graph_under_ms)
+            {
+                STACKIDE_LOG_ERROR(LogCategory::Render, "frame graph p99 {:.4f} ms exceeds gate {:.4f} ms",
+                                   graph.p99_ms, *opts.assert_frame_graph_under_ms);
                 return false;
             }
             return true;
@@ -671,30 +748,44 @@ namespace stackide
                 exit_code = EXIT_FAILURE;
             }
 
-            const std::vector<double> sorted = state.frame_times_ms.sorted();
-            const double p50 = percentile(sorted, kP50);
-            const double p99 = percentile(sorted, kP99);
-            const double max_ms = sorted.empty() ? 0.0 : sorted.back();
+            const MetricSummary frames = state.metrics.frame_summary();
 
             // The summary is program output, not a log line, so queued logs go first.
             log_flush();
             std::println(stderr,
-                         "frames presented: {}, cpu frame time p50={:.3f} ms p99={:.3f} ms "
+                         "frames presented: {}, cpu frame time p50={:.3f} ms p95={:.3f} ms p99={:.3f} ms "
                          "max={:.3f} ms, dropped={}, within {:.2f} ms budget: {:.1f}%",
-                         state.presented, p50, p99, max_ms, state.scheduler.missed_frames(),
-                         state.scheduler.budget_ms(), within_budget_percent(state));
+                         state.presented, frames.p50_ms, frames.p95_ms, frames.p99_ms, frames.max_ms,
+                         state.scheduler.missed_frames(), state.scheduler.budget_ms(), within_budget_percent(state));
 
             if (!report_input_to_paint(opts, state) && exit_code == EXIT_SUCCESS)
             {
                 exit_code = EXIT_FAILURE;
             }
-            if (exit_code == EXIT_SUCCESS && !check_frame_gates(opts, state, p99))
+            if (!report_frame_graph(opts, state) && exit_code == EXIT_SUCCESS)
+            {
+                exit_code = EXIT_FAILURE;
+            }
+            if (exit_code == EXIT_SUCCESS && !check_frame_gates(opts, state, frames.p99_ms))
             {
                 exit_code = EXIT_FAILURE;
             }
             if (exit_code == EXIT_SUCCESS && opts.idle_ms > 0)
             {
                 exit_code = check_idle(opts, state);
+            }
+            if (exit_code == EXIT_SUCCESS && opts.profile_frames > 0 &&
+                !finish_profile_run(opts,
+                                    ProfileReport{
+                                        .mode = "windowed",
+                                        .frames_presented = state.presented,
+                                        .frame_budget_ms = state.scheduler.budget_ms(),
+                                        .missed_frames = state.scheduler.missed_frames(),
+                                        .frame = frames,
+                                        .input_to_paint = state.metrics.input_to_paint_summary(),
+                                    }))
+            {
+                exit_code = EXIT_FAILURE;
             }
             return exit_code;
         }
@@ -711,6 +802,22 @@ namespace stackide
                 return platform::VideoBackend::X11;
             }
             return platform::VideoBackend::Native;
+        }
+
+        // Gives a profile run something on each worker lane, so that a profiler shows zones from
+        // those threads and not only the main one.
+        void spawn_profile_workload(Core& core)
+        {
+            constexpr int kTasksPerLane = 32;
+            constexpr auto kTaskLength = std::chrono::milliseconds{2};
+            for (int i = 0; i < kTasksPerLane; ++i)
+            {
+                for (const Lane lane : {Lane::Interactive, Lane::Background})
+                {
+                    std::ignore = core.workers().scheduler(lane).spawn([kTaskLength](const std::stop_token&)
+                                                                       { std::this_thread::sleep_for(kTaskLength); });
+                }
+            }
         }
 
         int render_window(const Options& opts)
@@ -750,6 +857,13 @@ namespace stackide
             {
                 return render::gpu_unavailable_code(opts);
             }
+            const std::optional<render::FrameGraph> graph = render::FrameGraph::create(*device, swapchain->format());
+            if (!graph)
+            {
+                return render::gpu_unavailable_code(opts);
+            }
+            state.show_frame_graph = opts.show_frame_graph;
+            const MemorySampler memory;
 
             // After everything the core could need, and before the loop that drains it.
             Core core{[] { platform::post_wakeup(); }};
@@ -759,7 +873,13 @@ namespace stackide
                 .swapchain = *swapchain,
                 .window = *window,
                 .quad = *quad,
+                .graph = *graph,
             };
+
+            if (opts.profile_frames > 0)
+            {
+                spawn_profile_workload(core);
+            }
 
             // Only a run measuring cadence has anything for warmup frames to protect.
             constexpr int kWarmupFrames = 20;

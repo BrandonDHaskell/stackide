@@ -165,3 +165,29 @@ TEST_CASE("frame scheduler test flags are checked")
     CHECK_FALSE(parse({"--input-sampling", "sideways"}));
     CHECK_FALSE(parse({"--offscreen", "--inject-input", "5"}));
 }
+
+TEST_CASE("profile flags are checked")
+{
+    const auto windowed = parse({"--profile-frames", "50"});
+    REQUIRE(windowed);
+    CHECK(windowed->frames == 50);
+    CHECK(windowed->timeout_ms > stackide::kDefaultTimeoutMs);
+
+    const auto offscreen = parse({"--offscreen", "--profile-frames", "50", "--profile-output", "x.json"});
+    REQUIRE(offscreen);
+    CHECK(offscreen->frames == 0);
+    CHECK(offscreen->profile_output == "x.json");
+
+    CHECK(parse({"--profile-frames", "5", "--assert-peak-rss-under-mb", "1024"}));
+    CHECK(parse({"--show-frame-graph", "--assert-frame-graph-under-ms", "0.1"}));
+
+    CHECK_FALSE(parse({"--profile-frames", "0"}));
+    CHECK_FALSE(parse({"--headless", "--profile-frames", "5"}));
+    CHECK_FALSE(parse({"--frames", "5", "--profile-frames", "5"}));
+    CHECK_FALSE(parse({"--idle-ms", "2000", "--profile-frames", "5"}));
+    CHECK_FALSE(parse({"--inject-input", "5", "--profile-frames", "5"}));
+    CHECK_FALSE(parse({"--profile-output"}));
+    CHECK_FALSE(parse({"--assert-peak-rss-under-mb", "1024"}));
+    CHECK_FALSE(parse({"--offscreen", "--show-frame-graph"}));
+    CHECK_FALSE(parse({"--assert-frame-graph-under-ms", "0.1"}));
+}

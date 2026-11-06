@@ -229,6 +229,83 @@ namespace stackide
             return ok;
         }
 
+        bool is_profile_flag(std::string_view arg)
+        {
+            return arg == "--profile-frames" || arg == "--profile-output" || arg == "--assert-peak-rss-under-mb" ||
+                arg == "--show-frame-graph" || arg == "--assert-frame-graph-under-ms";
+        }
+
+        bool parse_profile_flag(int argc, char** argv, int& i, std::string_view arg, Options& out)
+        {
+            const auto positive_int = [](int v) { return v > 0; };
+            if (arg == "--show-frame-graph")
+            {
+                out.show_frame_graph = true;
+                return true;
+            }
+            if (arg == "--profile-frames")
+            {
+                return next_int_arg(argc, argv, i, arg, positive_int, out.profile_frames);
+            }
+            if (arg == "--assert-peak-rss-under-mb")
+            {
+                int value = 0;
+                const bool ok = next_int_arg(argc, argv, i, arg, positive_int, value);
+                out.assert_peak_rss_under_mb = value;
+                return ok;
+            }
+            if (arg == "--assert-frame-graph-under-ms")
+            {
+                double value = 0.0;
+                const bool ok = next_double_arg(argc, argv, i, arg, [](double v) { return v > 0.0; }, value);
+                out.assert_frame_graph_under_ms = value;
+                return ok;
+            }
+            if (i + 1 >= argc)
+            {
+                std::println(stderr, "missing value for {}", arg);
+                return false;
+            }
+            out.profile_output = argv[++i];
+            return true;
+        }
+
+        bool validate_profile_flags(Options& out)
+        {
+            if (out.profile_frames > 0 && out.mode == Mode::Headless)
+            {
+                std::println(stderr, "--profile-frames requires rendering, so it can't be headless");
+                return false;
+            }
+            if (out.profile_frames > 0 && (out.frames > 0 || out.idle_ms > 0 || out.inject_input > 0))
+            {
+                std::println(stderr,
+                             "--profile-frames sets its own frame count, so it can't be combined with "
+                             "--frames, --idle-ms or --inject-input");
+                return false;
+            }
+            if (out.assert_peak_rss_under_mb && out.profile_frames == 0)
+            {
+                std::println(stderr, "--assert-peak-rss-under-mb requires --profile-frames");
+                return false;
+            }
+            if (out.show_frame_graph && out.mode != Mode::Windowed)
+            {
+                std::println(stderr, "--show-frame-graph requires windowed mode");
+                return false;
+            }
+            if (out.assert_frame_graph_under_ms && !out.show_frame_graph)
+            {
+                std::println(stderr, "--assert-frame-graph-under-ms requires --show-frame-graph");
+                return false;
+            }
+            if (out.profile_frames > 0 && out.mode == Mode::Windowed)
+            {
+                out.frames = out.profile_frames;
+            }
+            return true;
+        }
+
         bool validate_scheduler_flags(const Options& out)
         {
             const bool any = out.idle_ms > 0 || out.redraw_every_ms > 0 || out.inject_input > 0 ||
@@ -315,7 +392,9 @@ namespace stackide
                      "[--idle-ms N [--redraw-every-ms N]] [--inject-input N [--inject-interval-ms N]] "
                      "[--input-sampling late|naive] "
                      "[--assert-input-to-paint-under-ms MS] [--assert-within-budget-percent P] "
-                     "[--inject-stall-ms N] [--allow-skip] [--gpu-debug [--require-validation]]");
+                     "[--profile-frames N [--profile-output PATH] [--assert-peak-rss-under-mb N]] "
+                     "[--show-frame-graph [--assert-frame-graph-under-ms MS]] [--inject-stall-ms N] [--allow-skip] "
+                     "[--gpu-debug [--require-validation]]");
     }
 
     bool parse_args(int argc, char** argv, Options& out)
@@ -397,6 +476,10 @@ namespace stackide
             {
                 ok = next_int_arg(argc, argv, i, arg, positive_int, out.resize_height);
             }
+            else if (is_profile_flag(arg))
+            {
+                ok = parse_profile_flag(argc, argv, i, arg, out);
+            }
             else if (is_scheduler_flag(arg))
             {
                 ok = parse_scheduler_flag(argc, argv, i, arg, out);
@@ -413,6 +496,10 @@ namespace stackide
             }
         }
 
+        if (!validate_profile_flags(out))
+        {
+            return false;
+        }
         if (!timeout_given)
         {
             apply_default_timeout(out);

@@ -15,6 +15,7 @@ namespace stackide::platform
         DisplayChanged, // the window moved to another display, or that display's mode changed
         Exposed, // the window's contents need drawing again
         Input, // a key or button press, or a wheel movement
+        ToggleFrameGraph, // the fixed debug key (F12), until Phase 1 has keybindings
         Wakeup, // another thread has something for the main loop
     };
 

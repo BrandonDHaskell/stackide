@@ -43,6 +43,9 @@ FetchContent_Declare(tracy
 
 set(TRACY_STATIC ON CACHE BOOL "" FORCE)
 set(TRACY_ENABLE ${STACKIDE_PROFILING} CACHE BOOL "" FORCE)
+# Collects nothing until a profiler connects, so a profiling build left running with none
+# attached doesn't buffer zones without limit.
+set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(tracy)
 

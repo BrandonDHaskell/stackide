@@ -67,6 +67,16 @@
     { "name": "clang-tsan", "inherits": ["tsan", "clang-toolchain"] },
 
     {
+      "name": "gcc-profile",
+      "displayName": "Optimized, with Tracy zones compiled in. Connect a Tracy 0.14.1 profiler.",
+      "inherits": "gcc-toolchain",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "STACKIDE_PROFILING": "ON"
+      }
+    },
+
+    {
       "name": "macos",
       "displayName": "macOS ARM64 compile check. Set LLVM_ROOT to an LLVM 23 install.",
       "inherits": "base",
@@ -90,6 +100,7 @@
     { "name": "gcc-tsan", "configurePreset": "gcc-tsan" },
     { "name": "clang-asan", "configurePreset": "clang-asan" },
     { "name": "clang-tsan", "configurePreset": "clang-tsan" },
+    { "name": "gcc-profile", "configurePreset": "gcc-profile" },
     { "name": "macos", "configurePreset": "macos" }
   ],
 
@@ -126,6 +137,7 @@
     },
     { "name": "ci-gcc-asan", "inherits": "ci", "configurePreset": "gcc-asan" },
     { "name": "ci-clang-asan", "inherits": "ci", "configurePreset": "clang-asan" },
+    { "name": "ci-gcc-profile", "inherits": "ci", "configurePreset": "gcc-profile" },
     { "name": "ci-gcc-tsan", "inherits": "tsan-unit", "configurePreset": "gcc-tsan" },
     { "name": "ci-clang-tsan", "inherits": "tsan-unit", "configurePreset": "clang-tsan" }
   ]
