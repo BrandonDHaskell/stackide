@@ -104,7 +104,7 @@
       "name": "ci",
       "hidden": true,
       "inherits": "all",
-      "filter": { "exclude": { "label": "display" } },
+      "filter": { "exclude": { "label": "display|gate" } },
       "environment": { "STACKIDE_REQUIRE_GPU": "1" }
     },
 

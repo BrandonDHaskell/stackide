@@ -16,6 +16,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <stackide/base/log.hpp>
 #include <stackide/base/options.hpp>
 #include <stackide/base/scope_exit.hpp>
 #include <stackide/render/modes.hpp>
@@ -40,12 +41,12 @@ namespace stackide
 
             if (!SDL_Init(SDL_INIT_VIDEO))
             {
-                std::println(stderr, "SDL_Init failed: {}", SDL_GetError());
+                STACKIDE_LOG_ERROR(LogCategory::Platform, "SDL_Init failed: {}", SDL_GetError());
                 return EXIT_FAILURE;
             }
             ScopeExit quit{[] { SDL_Quit(); }};
 
-            std::println(stderr, "headless: video driver = {}", SDL_GetCurrentVideoDriver());
+            STACKIDE_LOG_INFO(LogCategory::Platform, "headless: video driver = {}", SDL_GetCurrentVideoDriver());
             return EXIT_SUCCESS;
         }
 
@@ -72,6 +73,8 @@ int main(int argc, char** argv)
         {
             opts.allow_skip = false;
         }
+
+        const stackide::LogSession logging{stackide::log_config_from_environment()};
 
         switch (opts.mode)
         {

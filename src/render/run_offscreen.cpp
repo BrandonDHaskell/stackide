@@ -1,6 +1,7 @@
 #include <stackide/render/modes.hpp>
 
 #include <stackide/base/constants.hpp>
+#include <stackide/base/log.hpp>
 #include <stackide/base/scope_exit.hpp>
 #include <stackide/render/quad_resources.hpp>
 #include <stackide/render/render_constants.hpp>
@@ -12,7 +13,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
-#include <print>
 #include <utility>
 
 namespace stackide
@@ -35,11 +35,11 @@ namespace stackide
             {
                 return true;
             }
-            std::println(stderr,
-                         "pixel mismatch at byte {}: got {:02X}{:02X}{:02X}{:02X}, "
-                         "expected {:02X}{:02X}{:02X}{:02X}",
-                         offset, px[0], px[1], px[2], px[3], expected.at(0), expected.at(1), expected.at(2),
-                         expected.at(3));
+            STACKIDE_LOG_ERROR(LogCategory::Render,
+                               "pixel mismatch at byte {}: got {:02X}{:02X}{:02X}{:02X}, "
+                               "expected {:02X}{:02X}{:02X}{:02X}",
+                               offset, px[0], px[1], px[2], px[3], expected.at(0), expected.at(1), expected.at(2),
+                               expected.at(3));
             return false;
         }
 
@@ -57,7 +57,7 @@ namespace stackide
 
         if (!SDL_Init(SDL_INIT_VIDEO))
         {
-            std::println(stderr, "SDL_Init failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_Init failed: {}", SDL_GetError());
             return EXIT_FAILURE;
         }
         ScopeExit quit{[] { SDL_Quit(); }};
@@ -65,17 +65,17 @@ namespace stackide
         SDL_GPUDevice* gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, opts.gpu_debug, nullptr);
         if (gpu == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUDevice failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUDevice failed: {}", SDL_GetError());
             return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
         }
         ScopeExit destroy_gpu{[gpu] { SDL_DestroyGPUDevice(gpu); }};
 
-        std::println(stderr, "offscreen: gpu driver = {}", SDL_GetGPUDeviceDriver(gpu));
+        STACKIDE_LOG_INFO(LogCategory::Render, "offscreen: gpu driver = {}", SDL_GetGPUDeviceDriver(gpu));
 
         constexpr auto kFormat = kOffscreenColorFormat;
         if (!SDL_GPUTextureSupportsFormat(gpu, kFormat, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET))
         {
-            std::println(stderr, "R8G8B8A8_UNORM_SRGB color target unsupported on this device");
+            STACKIDE_LOG_ERROR(LogCategory::Render, "R8G8B8A8_UNORM_SRGB color target unsupported on this device");
             return EXIT_FAILURE;
         }
 
@@ -92,7 +92,7 @@ namespace stackide
         SDL_GPUTexture* color = SDL_CreateGPUTexture(gpu, &tex_info);
         if (color == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUTexture failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUTexture failed: {}", SDL_GetError());
             return EXIT_FAILURE;
         }
         ScopeExit destroy_tex{[gpu, color] { SDL_ReleaseGPUTexture(gpu, color); }};
@@ -119,7 +119,7 @@ namespace stackide
         SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(gpu, &tb_info);
         if (transfer == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUTransferBuffer failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUTransferBuffer failed: {}", SDL_GetError());
             return EXIT_FAILURE;
         }
         ScopeExit destroy_tb{[gpu, transfer] { SDL_ReleaseGPUTransferBuffer(gpu, transfer); }};
@@ -127,7 +127,7 @@ namespace stackide
         SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(gpu);
         if (cmd == nullptr)
         {
-            std::println(stderr, "SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
             return EXIT_FAILURE;
         }
 
@@ -140,7 +140,7 @@ namespace stackide
         SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &target, 1, nullptr);
         if (pass == nullptr)
         {
-            std::println(stderr, "SDL_BeginGPURenderPass failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_BeginGPURenderPass failed: {}", SDL_GetError());
             SDL_CancelGPUCommandBuffer(cmd);
             return EXIT_FAILURE;
         }
@@ -172,7 +172,7 @@ namespace stackide
         SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
         if (copy == nullptr)
         {
-            std::println(stderr, "SDL_BeginGPUCopyPass failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_BeginGPUCopyPass failed: {}", SDL_GetError());
             SDL_CancelGPUCommandBuffer(cmd);
             return EXIT_FAILURE;
         }
@@ -195,12 +195,13 @@ namespace stackide
         SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
         if (fence == nullptr)
         {
-            std::println(stderr, "SDL_SubmitGPUCommandBufferAndAcquireFence failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_SubmitGPUCommandBufferAndAcquireFence failed: {}",
+                               SDL_GetError());
             return EXIT_FAILURE;
         }
         if (!SDL_WaitForGPUFences(gpu, true, &fence, 1))
         {
-            std::println(stderr, "SDL_WaitForGPUFences failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_WaitForGPUFences failed: {}", SDL_GetError());
             SDL_ReleaseGPUFence(gpu, fence);
             return EXIT_FAILURE;
         }
@@ -209,7 +210,7 @@ namespace stackide
         auto* pixels = static_cast<std::uint8_t*>(SDL_MapGPUTransferBuffer(gpu, transfer, false));
         if (pixels == nullptr)
         {
-            std::println(stderr, "SDL_MapGPUTransferBuffer failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_MapGPUTransferBuffer failed: {}", SDL_GetError());
             return EXIT_FAILURE;
         }
         ScopeExit unmap{[gpu, transfer] { SDL_UnmapGPUTransferBuffer(gpu, transfer); }};
@@ -239,7 +240,8 @@ namespace stackide
             }
         }
 
-        std::println(stderr, "offscreen: quad verified at {}x{} (4 UV checks)", kOffscreenWidth, kOffscreenHeight);
+        STACKIDE_LOG_INFO(LogCategory::Render, "offscreen: quad verified at {}x{} (4 UV checks)", kOffscreenWidth,
+                          kOffscreenHeight);
         return EXIT_SUCCESS;
     }
 

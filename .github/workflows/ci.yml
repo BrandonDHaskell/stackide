@@ -19,6 +19,9 @@ jobs:
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
       - run: ctest --preset ci-${{ matrix.preset }}
+      - name: Record log call cost
+        if: endsWith(matrix.preset, '-release')
+        run: build/${{ matrix.preset }}/tests/stackide_log_bench
 
   # TSan can't run under the runner's high ASLR entropy. Its fallback is to re-exec
   # with ASLR disabled, which Docker's default seccomp profile blocks.

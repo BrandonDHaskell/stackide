@@ -17,4 +17,8 @@ Checks: >
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-avoid-magic-numbers
 HeaderFilterRegex: 'src/.*/include/stackide/.*'
+CheckOptions:
+  # The log macros expand to branches at every call site, which says nothing about
+  # how hard the calling function is to follow.
+  readability-function-cognitive-complexity.IgnoreMacros: true
 ...

@@ -73,6 +73,13 @@ Do not "fix" these:
   A line produces positioned runs tagged by origin, not a string.
 - SDL3 pinned via FetchContent. Do not unpin.
 
+## Logging
+
+Use the `STACKIDE_LOG_*` macros from `stackide/base/log.hpp`, not direct stderr writes.
+Direct output is for program results and CLI errors only. Logging is asynchronous, so
+call `log_flush()` before printing direct output that must follow earlier log lines.
+`STACKIDE_LOG` sets the level and `STACKIDE_LOG_DIR` the directory.
+
 ## Gotchas
 
 - `git clone` from the local path copies committed history. Commit before

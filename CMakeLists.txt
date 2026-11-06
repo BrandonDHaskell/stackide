@@ -26,6 +26,7 @@ include(Lint)
 
 # 3. Modules
 add_library(stackide_base STATIC
+        src/base/log.cpp
         src/base/options.cpp
         src/base/include/stackide/base/constants.hpp
         src/base/include/stackide/base/log.hpp
@@ -33,7 +34,9 @@ add_library(stackide_base STATIC
         src/base/include/stackide/base/scope_exit.hpp
 )
 target_include_directories(stackide_base PUBLIC src/base/include)
-target_link_libraries(stackide_base PRIVATE stackide_warnings)
+target_link_libraries(stackide_base
+        PUBLIC Threads::Threads
+        PRIVATE stackide_warnings)
 
 # The SIMD baseline from docs/hardware-environment.md. NEON is implied on ARM64.
 # Public so every stackide target agrees, and constants.hpp fails the build otherwise.

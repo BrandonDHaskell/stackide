@@ -1,5 +1,8 @@
 include(FetchContent)
 
+# Part of the platform, not a third-party dependency, and pinned by nothing.
+find_package(Threads REQUIRED)
+
 FetchContent_Declare(SDL3
         URL      https://github.com/libsdl-org/SDL/releases/download/release-3.4.16/SDL3-3.4.16.tar.gz
         URL_HASH SHA256=7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68

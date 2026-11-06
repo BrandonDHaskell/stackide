@@ -9,6 +9,7 @@
 #   display  requires a window system (never runs on a stock CI runner)
 #   unit     Catch2 tests with no GPU or window
 #   build    checks on the build system itself
+#   gate     performance gate that needs Reference hardware, never run in CI
 #
 # Exit code 77 means "skipped" and is honored via SKIP_RETURN_CODE below.
 
@@ -164,7 +165,14 @@ list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_resize_in_offscreen)
 # ---------------------------------------------------------------------------
 set_tests_properties(${STACKIDE_SMOKE_TESTS} PROPERTIES
         TIMEOUT ${STACKIDE_SMOKE_TIMEOUT}
-        SKIP_RETURN_CODE 77)
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT_MODIFICATION "STACKIDE_LOG_DIR=set:${CMAKE_CURRENT_BINARY_DIR}/logs")
+
+# The log file must really be written by a normal run. A new directory each time, so
+# that an earlier run can't satisfy the check.
+add_test(NAME smoke.log_file_written
+        COMMAND sh -c "d=$(mktemp -d '${CMAKE_CURRENT_BINARY_DIR}/logs-check.XXXXXX') && STACKIDE_LOG_DIR=$d '$<TARGET_FILE:stackide>' --headless && grep -q 'video driver = dummy' $d/stackide.log")
+set_tests_properties(smoke.log_file_written PROPERTIES LABELS "smoke")
 
 # ---------------------------------------------------------------------------
 # Unit tests. No GPU or window, so these also run under TSan, where uninstrumented
@@ -172,6 +180,8 @@ set_tests_properties(${STACKIDE_SMOKE_TESTS} PROPERTIES
 # ---------------------------------------------------------------------------
 add_executable(stackide_unit_tests
         unit/test_constants.cpp
+        unit/test_log.cpp
+        unit/test_log_compile_level.cpp
         unit/test_options.cpp
         unit/test_percentile.cpp)
 target_link_libraries(stackide_unit_tests PRIVATE
@@ -195,3 +205,16 @@ stackide_add_boundary_test(clean)
 foreach(case direct transitive link_only alias)
     stackide_add_boundary_test(${case} PASS_REGULAR_EXPRESSION "core must not link")
 endforeach()
+
+# ---------------------------------------------------------------------------
+# Log call cost (#152). The gate only means something in an optimized, uninstrumented
+# build on Reference hardware, so it is labeled to stay out of CI, which runs the
+# benchmark just to record the number.
+# ---------------------------------------------------------------------------
+add_executable(stackide_log_bench bench/log_bench.cpp)
+target_link_libraries(stackide_log_bench PRIVATE stackide_base stackide_warnings)
+
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT STACKIDE_SANITIZE)
+    add_test(NAME bench.log_call_gate COMMAND stackide_log_bench --assert-under-ns 50)
+    set_tests_properties(bench.log_call_gate PROPERTIES LABELS "gate")
+endif()

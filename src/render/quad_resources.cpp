@@ -1,5 +1,6 @@
 #include <stackide/render/quad_resources.hpp>
 
+#include <stackide/base/log.hpp>
 #include <stackide/base/scope_exit.hpp>
 #include <stackide/render/render_constants.hpp>
 #include <stackide/shaders/quad_frag_spv.hpp>
@@ -10,7 +11,6 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
-#include <print>
 
 namespace stackide
 {
@@ -101,7 +101,7 @@ namespace stackide
         SDL_GPUShader* vert_shader = SDL_CreateGPUShader(gpu, &vert_info);
         if (vert_shader == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUShader (vertex) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUShader (vertex) failed: {}", SDL_GetError());
             return std::nullopt;
         }
         ScopeExit destroy_vert{[gpu, vert_shader] { SDL_ReleaseGPUShader(gpu, vert_shader); }};
@@ -116,7 +116,7 @@ namespace stackide
         SDL_GPUShader* frag_shader = SDL_CreateGPUShader(gpu, &frag_info);
         if (frag_shader == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUShader (fragment) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUShader (fragment) failed: {}", SDL_GetError());
             return std::nullopt;
         }
         ScopeExit destroy_frag{[gpu, frag_shader] { SDL_ReleaseGPUShader(gpu, frag_shader); }};
@@ -130,7 +130,7 @@ namespace stackide
         SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(gpu, &vb_info);
         if (vertex_buffer == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUBuffer (vertex) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUBuffer (vertex) failed: {}", SDL_GetError());
             return std::nullopt;
         }
         ScopeExit destroy_vb{[gpu, vertex_buffer] { SDL_ReleaseGPUBuffer(gpu, vertex_buffer); }};
@@ -141,7 +141,7 @@ namespace stackide
         SDL_GPUBuffer* index_buffer = SDL_CreateGPUBuffer(gpu, &ib_info);
         if (index_buffer == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUBuffer (index) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUBuffer (index) failed: {}", SDL_GetError());
             return std::nullopt;
         }
         ScopeExit destroy_ib{[gpu, index_buffer] { SDL_ReleaseGPUBuffer(gpu, index_buffer); }};
@@ -166,7 +166,7 @@ namespace stackide
         SDL_GPUTexture* texture = SDL_CreateGPUTexture(gpu, &tex_info);
         if (texture == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUTexture (checkerboard) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUTexture (checkerboard) failed: {}", SDL_GetError());
             return std::nullopt;
         }
         ScopeExit destroy_tex{[gpu, texture] { SDL_ReleaseGPUTexture(gpu, texture); }};
@@ -178,7 +178,7 @@ namespace stackide
         SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(gpu, &tb_info);
         if (transfer == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUTransferBuffer (upload) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUTransferBuffer (upload) failed: {}", SDL_GetError());
             return std::nullopt;
         }
         ScopeExit destroy_transfer{[gpu, transfer] { SDL_ReleaseGPUTransferBuffer(gpu, transfer); }};
@@ -186,7 +186,7 @@ namespace stackide
         auto* mapped = static_cast<std::uint8_t*>(SDL_MapGPUTransferBuffer(gpu, transfer, false));
         if (mapped == nullptr)
         {
-            std::println(stderr, "SDL_MapGPUTransferBuffer (upload) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_MapGPUTransferBuffer (upload) failed: {}", SDL_GetError());
             return std::nullopt;
         }
         std::memcpy(mapped, kQuadVertices.data(), kVertexBytes);
@@ -197,14 +197,14 @@ namespace stackide
         SDL_GPUCommandBuffer* upload_cmd = SDL_AcquireGPUCommandBuffer(gpu);
         if (upload_cmd == nullptr)
         {
-            std::println(stderr, "SDL_AcquireGPUCommandBuffer (upload) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_AcquireGPUCommandBuffer (upload) failed: {}", SDL_GetError());
             return std::nullopt;
         }
 
         SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(upload_cmd);
         if (copy == nullptr)
         {
-            std::println(stderr, "SDL_BeginGPUCopyPass (upload) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_BeginGPUCopyPass (upload) failed: {}", SDL_GetError());
             SDL_CancelGPUCommandBuffer(upload_cmd);
             return std::nullopt;
         }
@@ -234,7 +234,7 @@ namespace stackide
 
         if (!SDL_SubmitGPUCommandBuffer(upload_cmd))
         {
-            std::println(stderr, "SDL_SubmitGPUCommandBuffer (upload) failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_SubmitGPUCommandBuffer (upload) failed: {}", SDL_GetError());
             return std::nullopt;
         }
 
@@ -251,7 +251,7 @@ namespace stackide
         SDL_GPUSampler* sampler = SDL_CreateGPUSampler(gpu, &sampler_info);
         if (sampler == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUSampler failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUSampler failed: {}", SDL_GetError());
             return std::nullopt;
         }
         ScopeExit destroy_sampler{[gpu, sampler] { SDL_ReleaseGPUSampler(gpu, sampler); }};
@@ -302,7 +302,7 @@ namespace stackide
         SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &pipeline_info);
         if (pipeline == nullptr)
         {
-            std::println(stderr, "SDL_CreateGPUGraphicsPipeline failed: {}", SDL_GetError());
+            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUGraphicsPipeline failed: {}", SDL_GetError());
             return std::nullopt;
         }
 
