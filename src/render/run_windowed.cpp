@@ -2,10 +2,13 @@
 
 #include <stackide/base/constants.hpp>
 #include <stackide/base/log.hpp>
+#include <stackide/core/core.hpp>
 #include <stackide/platform/event.hpp>
+#include <stackide/platform/main_loop.hpp>
 #include <stackide/platform/video.hpp>
 #include <stackide/platform/window.hpp>
 #include <stackide/profile/percentile.hpp>
+#include <stackide/profile/stall_detector.hpp>
 #include <stackide/render/gpu.hpp>
 #include <stackide/render/quad_resources.hpp>
 #include <stackide/render/render_constants.hpp>
@@ -20,6 +23,9 @@
 #include <cstdlib>
 #include <optional>
 #include <print>
+#include <thread>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace stackide
@@ -38,6 +44,21 @@ namespace stackide
         constexpr std::size_t kDefaultFrameCapacityReserve = 4096;
         constexpr Uint32 kOccludedFrameDelayMs = 16;
 
+        // The working budget from docs/hardware-environment.md, for when the display can't
+        // say what its refresh rate is.
+        constexpr double kFallbackFrameBudgetMs = 16.0;
+
+        // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members): a bundle of
+        // arguments, which never outlives the function that declares what it refers to.
+        struct Renderer
+        {
+            const render::Device& device;
+            const render::Swapchain& swapchain;
+            platform::Window& window;
+            const QuadResources& quad;
+        };
+        // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
+
         // Shrinks whichever NDC axis is longer so the (square) checkerboard quad
         // doesn't stretch to fill a non-square window.
         std::array<float, 2> letterbox_scale(platform::PixelSize size)
@@ -54,32 +75,57 @@ namespace stackide
             return {1.0F, static_cast<float>(aspect)};
         }
 
+        void handle_event(const platform::Event& event, const platform::Window& window, bool& quit)
+        {
+            switch (event.type)
+            {
+            case platform::EventType::Quit:
+                quit = true;
+                break;
+            case platform::EventType::WindowResized:
+                STACKIDE_LOG_DEBUG(LogCategory::Platform, "window resized to {}x{} pixels", event.size.width,
+                                   event.size.height);
+                break;
+            case platform::EventType::ScaleChanged:
+                STACKIDE_LOG_INFO(LogCategory::Platform, "display scale changed to {:.2f}",
+                                  static_cast<double>(window.display_scale()));
+                break;
+            case platform::EventType::DisplayChanged:
+                STACKIDE_LOG_INFO(LogCategory::Platform, "display changed, refresh rate {:.2f} Hz",
+                                  static_cast<double>(window.refresh_hz()));
+                break;
+            case platform::EventType::Wakeup:
+                // Only here to end a wait: pump() drains the messages next anyway.
+                break;
+            }
+        }
+
+        void handle_message(const CoreToUi& message)
+        {
+            std::visit(
+                [](const auto& value)
+                {
+                    using Message = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<Message, ProgressBegin>)
+                    {
+                        STACKIDE_LOG_INFO(LogCategory::Core, "progress {}: started {}", value.token.value, value.title);
+                    }
+                    else if constexpr (std::is_same_v<Message, ProgressEnd>)
+                    {
+                        STACKIDE_LOG_INFO(LogCategory::Core, "progress {}: ended {}", value.token.value, value.message);
+                    }
+                    // Reports and redraws have nowhere to go until there's a UI to show
+                    // them and a scheduler to request frames from (#8).
+                },
+                message);
+        }
+
         // Handles everything pending, returning whether a quit was among it.
-        bool process_events(const platform::Window& window)
+        bool pump_main_loop(platform::MainLoop& loop, const platform::Window& window)
         {
             bool quit = false;
-            platform::Event event;
-            while (platform::poll_event(event))
-            {
-                switch (event.type)
-                {
-                case platform::EventType::Quit:
-                    quit = true;
-                    break;
-                case platform::EventType::WindowResized:
-                    STACKIDE_LOG_DEBUG(LogCategory::Platform, "window resized to {}x{} pixels", event.size.width,
-                                       event.size.height);
-                    break;
-                case platform::EventType::ScaleChanged:
-                    STACKIDE_LOG_INFO(LogCategory::Platform, "display scale changed to {:.2f}",
-                                      static_cast<double>(window.display_scale()));
-                    break;
-                case platform::EventType::DisplayChanged:
-                    STACKIDE_LOG_INFO(LogCategory::Platform, "display changed, refresh rate {:.2f} Hz",
-                                      static_cast<double>(window.refresh_hz()));
-                    break;
-                }
-            }
+            loop.pump([&](const platform::Event& event) { handle_event(event, window, quit); },
+                      [](const CoreToUi& message) { handle_message(message); });
             return quit;
         }
 
@@ -98,17 +144,19 @@ namespace stackide
         };
 
         // Renders and submits one frame. Returns nullopt on a real failure.
-        std::optional<RenderedFrame> render_frame(const render::Device& device, const render::Swapchain& swapchain,
-                                                  const platform::Window& window, const QuadResources& quad)
+        std::optional<RenderedFrame> render_frame(const Renderer& renderer, StallDetector& stalls)
         {
-            std::optional<render::CommandBuffer> commands = render::CommandBuffer::acquire(device);
+            stalls.phase("acquiring a command buffer");
+            std::optional<render::CommandBuffer> commands = render::CommandBuffer::acquire(renderer.device);
             if (!commands)
             {
                 return std::nullopt;
             }
 
+            // Waiting for the display isn't work, and neither is the occluded delay below.
+            stalls.pause();
             const auto wait_start = Clock::now();
-            const std::optional<SDL_GPUTexture*> target = commands->wait_for_swapchain_texture(swapchain);
+            const std::optional<SDL_GPUTexture*> target = commands->wait_for_swapchain_texture(renderer.swapchain);
             if (!target)
             {
                 return std::nullopt;
@@ -123,13 +171,14 @@ namespace stackide
                 return RenderedFrame{.presented = false, .swapchain_wait_ms = swapchain_wait_ms};
             }
 
+            stalls.phase("recording and submitting the frame");
             {
                 std::optional<render::RenderPass> pass = commands->begin_render_pass(*target, clear_color());
                 if (!pass)
                 {
                     return std::nullopt;
                 }
-                draw_quad(*commands, *pass, quad, letterbox_scale(window.size_in_pixels()));
+                draw_quad(*commands, *pass, renderer.quad, letterbox_scale(renderer.window.size_in_pixels()));
             }
             commands->submit();
             return RenderedFrame{.presented = true, .swapchain_wait_ms = swapchain_wait_ms};
@@ -148,16 +197,17 @@ namespace stackide
         // ~10 frames, regardless of how long the process waits beforehand -- it is
         // tied to frame count, not wall-clock time). Polling drains the event queue,
         // so a quit seen here has to be reported or it is lost.
-        WarmupResult run_warmup_frames(const render::Device& device, const render::Swapchain& swapchain,
-                                       const platform::Window& window, const QuadResources& quad, int count)
+        WarmupResult run_warmup_frames(const Renderer& renderer, platform::MainLoop& loop, int count)
         {
+            // Never ended: these frames are known to be slow, so they aren't reported.
+            StallDetector unreported{kFallbackFrameBudgetMs};
             for (int i = 0; i < count; ++i)
             {
-                if (process_events(window))
+                if (pump_main_loop(loop, renderer.window))
                 {
                     return WarmupResult::QuitRequested;
                 }
-                if (!render_frame(device, swapchain, window, quad))
+                if (!render_frame(renderer, unreported))
                 {
                     return WarmupResult::Failed;
                 }
@@ -187,13 +237,25 @@ namespace stackide
             stats.frame_times_ms.push_back(cost_ms);
         }
 
+        void inject_stall_once(const Options& opts, StallDetector& stalls, bool& injected)
+        {
+            if (opts.inject_stall_ms > 0 && !injected)
+            {
+                stalls.phase("injected stall");
+                std::this_thread::sleep_for(std::chrono::milliseconds{opts.inject_stall_ms});
+                injected = true;
+            }
+        }
+
         // Runs the measured loop: presents frames until quit, --frames is reached,
         // or --timeout-ms elapses, tracking per-frame timing and dropped-frame
         // counts along the way.
-        FrameStats run_measured_loop(const render::Device& device, const render::Swapchain& swapchain,
-                                     platform::Window& window, const QuadResources& quad, const Options& opts,
+        FrameStats run_measured_loop(const Renderer& renderer, platform::MainLoop& loop, const Options& opts,
                                      double expected_interval_ms)
         {
+            StallDetector stalls{expected_interval_ms > 0.0 ? expected_interval_ms : kFallbackFrameBudgetMs};
+            bool stall_injected = false;
+
             FrameStats stats;
             stats.frame_times_ms.reserve(opts.frames > 0 ? static_cast<std::size_t>(opts.frames)
                                                          : kDefaultFrameCapacityReserve);
@@ -205,18 +267,23 @@ namespace stackide
             while (running)
             {
                 const auto frame_start = Clock::now();
+                stalls.begin_iteration();
 
-                if (process_events(window))
+                stalls.phase("handling events and messages");
+                if (pump_main_loop(loop, renderer.window))
                 {
                     break;
                 }
 
-                const std::optional<RenderedFrame> frame = render_frame(device, swapchain, window, quad);
+                const std::optional<RenderedFrame> frame = render_frame(renderer, stalls);
                 if (!frame)
                 {
                     stats.exit_code = EXIT_FAILURE;
                     break;
                 }
+
+                inject_stall_once(opts, stalls, stall_injected);
+                stalls.end_iteration();
 
                 if (frame->presented)
                 {
@@ -230,7 +297,7 @@ namespace stackide
 
                     if (opts.resize_after_frames > 0 && stats.presented == opts.resize_after_frames)
                     {
-                        window.set_size(opts.resize_width, opts.resize_height);
+                        renderer.window.set_size(opts.resize_width, opts.resize_height);
                     }
 
                     if (opts.frames > 0 && stats.presented >= opts.frames)
@@ -357,8 +424,13 @@ namespace stackide
                 return render::gpu_unavailable_code(opts);
             }
 
+            // After everything the core could need, and before the loop that drains it.
+            Core core{[] { platform::post_wakeup(); }};
+            platform::MainLoop loop{core.to_ui()};
+            const Renderer renderer{.device = *device, .swapchain = *swapchain, .window = *window, .quad = *quad};
+
             constexpr int kWarmupFrames = 20;
-            const WarmupResult warmup = run_warmup_frames(*device, *swapchain, *window, *quad, kWarmupFrames);
+            const WarmupResult warmup = run_warmup_frames(renderer, loop, kWarmupFrames);
             if (warmup == WarmupResult::Failed)
             {
                 return EXIT_FAILURE;
@@ -366,7 +438,7 @@ namespace stackide
 
             const FrameStats stats = warmup == WarmupResult::QuitRequested
                 ? FrameStats{}
-                : run_measured_loop(*device, *swapchain, *window, *quad, opts, expected_interval_ms);
+                : run_measured_loop(renderer, loop, opts, expected_interval_ms);
             return report_and_gate(opts, stats, expected_interval_ms);
         }
 

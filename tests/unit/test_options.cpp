@@ -121,3 +121,13 @@ TEST_CASE("mailbox is a present mode")
     REQUIRE(opts);
     CHECK(opts->present_mode == stackide::PresentMode::Mailbox);
 }
+
+TEST_CASE("injecting a stall is windowed only")
+{
+    const auto opts = parse({"--inject-stall-ms", "50"});
+    REQUIRE(opts);
+    CHECK(opts->inject_stall_ms == 50);
+
+    CHECK_FALSE(parse({"--inject-stall-ms", "0"}));
+    CHECK_FALSE(parse({"--offscreen", "--inject-stall-ms", "50"}));
+}

@@ -44,8 +44,8 @@ the values-only rule also relies on review.
 
 ## Consequences
 
-- The event queues in #9 carry these types, so the in-process transport can be
-  replaced without changing either layer.
+- `BoundedQueue<CoreToUi>` and `BoundedQueue<UiToCore>` in `Core` carry these types, so
+  the in-process transport can be replaced without changing either layer.
 - Every core-to-UI update has a copy cost, and every keystroke crosses threads.
   That crossing counts against the under-8 ms input-to-paint budget. It is expected
   to be small next to the budget, but this is unmeasured until #142.

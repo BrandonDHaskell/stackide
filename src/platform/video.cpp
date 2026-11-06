@@ -14,6 +14,7 @@ namespace stackide::platform
 
         // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
         constinit std::atomic<std::uint64_t> g_gpu_errors{0};
+        constinit std::atomic<std::uint32_t> g_wakeup_event_type{0};
         constinit std::atomic<bool> g_validation_missing{false};
         // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
@@ -97,6 +98,7 @@ namespace stackide::platform
             STACKIDE_LOG_ERROR(LogCategory::Platform, "SDL_Init failed: {}", SDL_GetError());
             return std::nullopt;
         }
+        g_wakeup_event_type.store(SDL_RegisterEvents(1), std::memory_order_release);
         return Video{};
     }
 
@@ -115,6 +117,8 @@ namespace stackide::platform
         const char* name = SDL_GetCurrentVideoDriver();
         return name != nullptr ? std::string_view{name} : std::string_view{};
     }
+
+    std::uint32_t wakeup_event_type() { return g_wakeup_event_type.load(std::memory_order_acquire); }
 
     std::uint64_t gpu_error_count() { return g_gpu_errors.load(std::memory_order_relaxed); }
 

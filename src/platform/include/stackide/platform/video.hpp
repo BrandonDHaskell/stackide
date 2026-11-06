@@ -37,6 +37,9 @@ namespace stackide::platform
         bool active_ = true;
     };
 
+    // SDL's event type for wakeups, valid while a Video exists.
+    std::uint32_t wakeup_event_type();
+
     // Errors SDL's GPU code has logged, including validation layer errors.
     std::uint64_t gpu_error_count();
 

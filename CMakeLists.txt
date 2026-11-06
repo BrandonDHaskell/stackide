@@ -32,6 +32,7 @@ include(Lint)
 add_library(stackide_base STATIC
         src/base/log.cpp
         src/base/options.cpp
+        src/base/include/stackide/base/bounded_queue.hpp
         src/base/include/stackide/base/bump_cursor.hpp
         src/base/include/stackide/base/constants.hpp
         src/base/include/stackide/base/log.hpp
@@ -56,7 +57,9 @@ endif()
 
 add_library(stackide_profile STATIC
         src/profile/percentile.cpp
+        src/profile/stall_detector.cpp
         src/profile/include/stackide/profile/percentile.hpp
+        src/profile/include/stackide/profile/stall_detector.hpp
 )
 target_include_directories(stackide_profile PUBLIC src/profile/include)
 target_link_libraries(stackide_profile
@@ -65,24 +68,32 @@ target_link_libraries(stackide_profile
 
 # Never links SDL or UI code: see docs/adr/0001-ui-core-split.md.
 add_library(stackide_core STATIC
+        src/core/core.cpp
         src/core/messages.cpp
+        src/core/worker_pool.cpp
+        src/core/include/stackide/core/core.hpp
         src/core/include/stackide/core/messages.hpp
+        src/core/include/stackide/core/worker_pool.hpp
 )
 target_include_directories(stackide_core PUBLIC src/core/include)
-target_link_libraries(stackide_core PRIVATE stackide_warnings)
+target_link_libraries(stackide_core
+        PUBLIC stackide_base
+        PRIVATE stackide_warnings)
 
 # The only module besides render that may use SDL. Its public headers don't include it.
 add_library(stackide_platform STATIC
         src/platform/event.cpp
+        src/platform/main_loop.cpp
         src/platform/video.cpp
         src/platform/window.cpp
         src/platform/include/stackide/platform/event.hpp
+        src/platform/include/stackide/platform/main_loop.hpp
         src/platform/include/stackide/platform/video.hpp
         src/platform/include/stackide/platform/window.hpp
 )
 target_include_directories(stackide_platform PUBLIC src/platform/include)
 target_link_libraries(stackide_platform
-        PUBLIC stackide_base
+        PUBLIC stackide_base stackide_core
         PRIVATE SDL3::SDL3 stackide_warnings)
 
 add_library(stackide_render STATIC
@@ -101,7 +112,7 @@ target_include_directories(stackide_render
         PUBLIC src/render/include
         PRIVATE "${STACKIDE_SHADER_INCLUDE_DIR}")
 target_link_libraries(stackide_render
-        PUBLIC stackide_base stackide_platform
+        PUBLIC stackide_base stackide_core stackide_platform
         PRIVATE SDL3::SDL3 stackide_profile stackide_warnings)
 
 stackide_add_shader(stackide_render shaders/quad.vert.hlsl vert kQuadVertSpv)

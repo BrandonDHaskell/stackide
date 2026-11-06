@@ -1,5 +1,7 @@
 #include <stackide/platform/event.hpp>
 
+#include <stackide/platform/video.hpp>
+
 #include <SDL3/SDL.h>
 
 namespace stackide::platform
@@ -36,6 +38,11 @@ namespace stackide::platform
                 out.type = EventType::DisplayChanged;
                 return true;
             default:
+                if (event.type == wakeup_event_type())
+                {
+                    out.type = EventType::Wakeup;
+                    return true;
+                }
                 break;
             }
         }

@@ -43,6 +43,10 @@ namespace stackide
         // M1 item 7: requires windowed mode with --present-mode vsync.
         std::optional<int> assert_max_dropped_frames;
 
+        // Makes one main-loop iteration this slow, to prove stalls get caught. Requires
+        // windowed mode.
+        int inject_stall_ms = 0;
+
         // M1 item 8: requires windowed mode. All three or none.
         int resize_after_frames = 0; // 0 means no programmatic resize
         int resize_width = 0;

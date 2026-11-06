@@ -123,6 +123,11 @@ namespace stackide
                 std::println(stderr, "--video-driver requires windowed mode");
                 return false;
             }
+            if (out.inject_stall_ms > 0 && out.mode != Mode::Windowed)
+            {
+                std::println(stderr, "--inject-stall-ms requires windowed mode");
+                return false;
+            }
             if (out.require_validation && !out.gpu_debug)
             {
                 std::println(stderr, "--require-validation requires --gpu-debug");
@@ -174,7 +179,7 @@ namespace stackide
                      "[--timeout-ms N] [--present-mode vsync|mailbox|immediate] [--video-driver wayland|x11] "
                      "[--assert-p99-under-ms MS] [--assert-max-dropped-frames N] "
                      "[--resize-after-frames N --resize-width W --resize-height H] "
-                     "[--allow-skip] [--gpu-debug [--require-validation]]");
+                     "[--inject-stall-ms N] [--allow-skip] [--gpu-debug [--require-validation]]");
     }
 
     bool parse_args(int argc, char** argv, Options& out)
@@ -237,6 +242,10 @@ namespace stackide
                 double value = 0.0;
                 ok = next_double_arg(argc, argv, i, arg, positive_double, value);
                 out.assert_p99_under_ms = value;
+            }
+            else if (arg == "--inject-stall-ms")
+            {
+                ok = next_int_arg(argc, argv, i, arg, positive_int, out.inject_stall_ms);
             }
             else if (arg == "--resize-after-frames")
             {

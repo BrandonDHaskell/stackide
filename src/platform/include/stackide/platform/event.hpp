@@ -13,6 +13,7 @@ namespace stackide::platform
         WindowResized, // size holds the new size in physical pixels
         ScaleChanged, // the window's display scale changed
         DisplayChanged, // the window moved to another display, or that display's mode changed
+        Wakeup, // another thread has something for the main loop
     };
 
     struct Event

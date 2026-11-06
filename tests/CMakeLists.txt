@@ -113,6 +113,13 @@ set_tests_properties(smoke.cadence_gate PROPERTIES
         RESOURCE_LOCK gpu)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.cadence_gate)
 
+# The stall detector has to be wired into the real loop, not just work in isolation.
+add_test(NAME smoke.stall_detected
+        COMMAND sh -c "d=$(mktemp -d '${CMAKE_CURRENT_BINARY_DIR}/logs-check.XXXXXX') && STACKIDE_LOG_DIR=$d '$<TARGET_FILE:stackide>' --frames 5 --inject-stall-ms 50 --timeout-ms 10000 && grep -q 'main loop stall.*injected stall.*run_windowed.cpp' $d/stackide.log")
+set_tests_properties(smoke.stall_detected PROPERTIES
+        LABELS "smoke;gpu;display"
+        RESOURCE_LOCK gpu)
+
 # ---------------------------------------------------------------------------
 # Negative tests: bad input must fail loudly, not fall back to a default.
 # ---------------------------------------------------------------------------
@@ -198,17 +205,33 @@ set_tests_properties(smoke.log_file_written PROPERTIES LABELS "smoke")
 # Unit tests. No GPU or window, so these also run under TSan, where uninstrumented
 # drivers make the GPU tests unusable.
 # ---------------------------------------------------------------------------
+# Long enough for a sanitizer on a slow runner. A concurrency bug can show up as a hang,
+# which should fail the test rather than stall CI.
+set(STACKIDE_UNIT_TIMEOUT 300
+        CACHE STRING "Wall-clock timeout, in seconds, for each unit test binary")
+
 add_executable(stackide_unit_tests
+        unit/test_bounded_queue.cpp
         unit/test_bump_cursor.cpp
         unit/test_constants.cpp
+        unit/test_core.cpp
         unit/test_log.cpp
         unit/test_log_compile_level.cpp
         unit/test_options.cpp
-        unit/test_percentile.cpp)
+        unit/test_percentile.cpp
+        unit/test_stall_detector.cpp
+        unit/test_worker_pool.cpp)
 target_link_libraries(stackide_unit_tests PRIVATE
-        stackide_base stackide_profile stackide_warnings Catch2::Catch2WithMain)
+        stackide_base stackide_core stackide_profile stackide_warnings Catch2::Catch2WithMain)
 add_test(NAME unit COMMAND stackide_unit_tests)
-set_tests_properties(unit PROPERTIES LABELS "unit")
+set_tests_properties(unit PROPERTIES LABELS "unit" TIMEOUT ${STACKIDE_UNIT_TIMEOUT})
+
+# Uses SDL's dummy video backend, so it needs no display or GPU and can run under TSan.
+add_executable(stackide_main_loop_tests platform/test_main_loop.cpp)
+target_link_libraries(stackide_main_loop_tests PRIVATE
+        stackide_core stackide_platform SDL3::SDL3 stackide_warnings Catch2::Catch2WithMain)
+add_test(NAME unit.main_loop COMMAND stackide_main_loop_tests)
+set_tests_properties(unit.main_loop PROPERTIES LABELS "unit" TIMEOUT ${STACKIDE_UNIT_TIMEOUT})
 
 # ---------------------------------------------------------------------------
 # Module boundary check (docs/adr/0001-ui-core-split.md), run against fake targets.
