@@ -75,7 +75,7 @@
         "CMAKE_CXX_COMPILER": "$env{LLVM_ROOT}/bin/clang++",
         "CMAKE_C_COMPILER": "$env{LLVM_ROOT}/bin/clang",
         "CMAKE_CXX_FLAGS": "-stdlib=libc++",
-        "CMAKE_EXE_LINKER_FLAGS": "-L$env{LLVM_ROOT}/lib -Wl,-rpath,$env{LLVM_ROOT}/lib",
+        "CMAKE_EXE_LINKER_FLAGS": "-L$env{LLVM_ROOT}/lib -Wl,-rpath,$env{LLVM_ROOT}/lib -lc++abi -lunwind",
         "STACKIDE_BUILD_TESTS": "OFF"
       }
     }
