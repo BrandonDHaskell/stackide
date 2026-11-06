@@ -16,6 +16,7 @@ if(NOT GLSLANG_VALIDATOR)
 endif()
 
 set(STACKIDE_SHADER_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+set(STACKIDE_GENERATE_SHADER_HEADER "${CMAKE_CURRENT_LIST_DIR}/GenerateShaderHeader.cmake")
 
 # stackide_add_shader(<target> <source>.hlsl <vert|frag> <var-name>)
 #
@@ -44,8 +45,8 @@ function(stackide_add_shader target source stage var_name)
                     "-DINPUT_SPV=${spv_path}"
                     "-DOUTPUT_HEADER=${header_path}"
                     "-DVAR_NAME=${var_name}"
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateShaderHeader.cmake"
-            DEPENDS "${spv_path}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateShaderHeader.cmake"
+                    -P "${STACKIDE_GENERATE_SHADER_HEADER}"
+            DEPENDS "${spv_path}" "${STACKIDE_GENERATE_SHADER_HEADER}"
             COMMENT "Embedding ${base_name}.spv as ${var_name}"
             VERBATIM
     )

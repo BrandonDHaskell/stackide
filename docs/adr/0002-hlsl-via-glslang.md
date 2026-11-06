@@ -1,6 +1,6 @@
 # ADR-0002: HLSL shaders compiled with glslang
 
-Status: accepted, pending confirmation under validation layers
+Status: accepted
 Date: 2026-11-05
 Issue: #7
 
@@ -44,10 +44,15 @@ don't work: `sampler2D` emits a sampler with no image, and it doesn't recognize 
 
 - `spirv-val` accepts the output for Vulkan 1.2.
 - `--offscreen` pixel checks pass on the NVIDIA driver and on lavapipe.
-- **Not yet confirmed:** a run under the Khronos validation layers. Shared bindings
-  should be valid for a combined descriptor, but correct pixels don't prove it.
-  `smoke.offscreen_validated` is the check, and this ADR's status should change once
-  it passes in CI.
+- Under the Khronos validation layers (1.4.309, on lavapipe), these shaders report no
+  errors, while a sampler at its own binding reports
+  `VUID-VkGraphicsPipelineCreateInfo-layout-07988`. That shader still rendered correct
+  pixels on lavapipe, which is why pixels alone can't check this.
+
+SDL installs no debug messenger, so a `--gpu-debug` run sends the layer's output to a
+file and fails on any error in it. `gpu.validation_gate` proves that with a bad shader,
+and `smoke.offscreen_validated` runs the real ones. The windowed path isn't validated
+yet: CI has no display, and the development machine has no layers installed.
 
 ## Consequences
 

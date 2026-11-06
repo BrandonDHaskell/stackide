@@ -3,6 +3,15 @@
 #include <stackide/base/log.hpp>
 #include <stackide/platform/video.hpp>
 
+#include <unistd.h>
+
+#include <cstdint>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <string>
+#include <system_error>
+
 namespace stackide::render
 {
     namespace
@@ -18,10 +27,45 @@ namespace stackide::render
             return Handle{device, raw};
         }
 
+        // SDL installs no debug messenger, so validation errors never reach its log. Left
+        // alone, the layer prints them to stdout and the run still succeeds. Sending them
+        // to a file lets a debug run fail on them.
+        std::filesystem::path validation_log_path()
+        {
+            return std::filesystem::temp_directory_path() / std::format("stackide-validation-{}.log", ::getpid());
+        }
+
+        // Logs and counts what the layer wrote, then removes the file.
+        std::uint64_t take_validation_errors()
+        {
+            const auto path = validation_log_path();
+            std::uint64_t errors = 0;
+            {
+                std::ifstream file{path};
+                for (std::string line; std::getline(file, line);)
+                {
+                    if (line.starts_with("Validation Error"))
+                    {
+                        ++errors;
+                        STACKIDE_LOG_ERROR(LogCategory::Render, "{}", line);
+                    }
+                }
+            }
+            std::error_code ignored;
+            std::filesystem::remove(path, ignored);
+            return errors;
+        }
+
     } // namespace
 
     std::optional<Device> Device::create(bool debug)
     {
+        if (debug)
+        {
+            // Read by the layer when the device's Vulkan instance is created.
+            ::setenv("VK_KHRONOS_VALIDATION_LOG_FILENAME", validation_log_path().c_str(), 1);
+        }
+
         SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, debug, nullptr);
         if (device == nullptr)
         {
@@ -311,7 +355,8 @@ namespace stackide::render
         {
             return exit_code;
         }
-        if (const auto errors = platform::gpu_error_count(); errors > 0)
+        const auto errors = platform::gpu_error_count() + take_validation_errors();
+        if (errors > 0)
         {
             STACKIDE_LOG_ERROR(LogCategory::Render, "gpu debug: {} error(s) reported", errors);
             return EXIT_FAILURE;

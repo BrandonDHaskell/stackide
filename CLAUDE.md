@@ -86,6 +86,9 @@ call `log_flush()` before printing direct output that must follow earlier log li
   testing what CI will see; mount the working tree directly when iterating.
 - Always pass `-u "$(id -u):$(id -g)"` to docker run with a mounted tree,
   or you get root-owned files in your source tree.
+- SDL installs no Vulkan debug messenger, so validation errors never reach its log.
+  `--gpu-debug` reads them from a file instead. Correct pixels don't imply valid usage:
+  lavapipe renders some invalid bindings correctly.
 - The toolchain image sets `SDL_VIDEODRIVER=dummy`, which beats a normal
   `SDL_SetHint`. A mode that needs a specific video driver must set the hint with
   `SDL_HINT_OVERRIDE`. The container renders on lavapipe (software Vulkan).

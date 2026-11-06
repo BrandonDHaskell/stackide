@@ -239,6 +239,21 @@ set_tests_properties(gpu.upload_ring PROPERTIES
         RESOURCE_LOCK gpu
         SKIP_REGULAR_EXPRESSION "skipped: no GPU device")
 
+# The validation gate has to be able to fail: a shader SDL_GPU can't use, on a real
+# device, must make a --gpu-debug result a failure. Its own binary because the upload
+# ring test must set SDL's memory functions before anything else touches SDL.
+add_executable(stackide_gpu_validation_tests gpu/test_validation.cpp)
+target_include_directories(stackide_gpu_validation_tests PRIVATE "${STACKIDE_SHADER_INCLUDE_DIR}")
+target_link_libraries(stackide_gpu_validation_tests PRIVATE
+        stackide_render stackide_platform SDL3::SDL3 stackide_warnings Catch2::Catch2WithMain)
+stackide_add_shader(stackide_gpu_validation_tests gpu/bad_binding.frag.hlsl frag kBadBindingFragSpv)
+add_dependencies(stackide_gpu_validation_tests stackide_render)
+add_test(NAME gpu.validation_gate COMMAND stackide_gpu_validation_tests)
+set_tests_properties(gpu.validation_gate PROPERTIES
+        LABELS "gpu"
+        RESOURCE_LOCK gpu
+        SKIP_REGULAR_EXPRESSION "skipped: validation layers not installed")
+
 # ---------------------------------------------------------------------------
 # Log call cost (#152). The gate only means something in an optimized, uninstrumented
 # build on Reference hardware, so it is labeled to stay out of CI, which runs the
