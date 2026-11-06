@@ -5,35 +5,76 @@ project(stackide LANGUAGES C CXX)
 option(STACKIDE_HEADLESS "Build without GUI backends" OFF)
 option(STACKIDE_BUILD_TESTS "Build stackide tests" ${PROJECT_IS_TOP_LEVEL})
 option(STACKIDE_WERROR "Treat warnings as errors" ${PROJECT_IS_TOP_LEVEL})
+option(STACKIDE_PROFILING "Compile Tracy profiling in" OFF)
+set(STACKIDE_SANITIZE "" CACHE STRING "Value for -fsanitize=, empty to disable")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# 2. Dependencies
+# 2. Toolchain and dependencies
 include(CompilerChecks)
+
+# Set before the dependencies so they are instrumented too: TSan reports false
+# races across uninstrumented code, and ASan misses overflows into it.
+if(STACKIDE_SANITIZE)
+    add_compile_options("-fsanitize=${STACKIDE_SANITIZE}" -fno-omit-frame-pointer)
+    add_link_options("-fsanitize=${STACKIDE_SANITIZE}")
+endif()
+
 include(cmake/Dependencies.cmake)
 include(Shaders)
+include(Lint)
 
-# 3. Core Targets
-add_executable(stackide
-        src/stackide/main.cpp
-        src/stackide/options.cpp
-        src/stackide/quad_resources.cpp
-        src/stackide/run_offscreen.cpp
-        src/stackide/run_windowed.cpp
-        include/stackide/constants.hpp
-        include/stackide/log.hpp
-        include/stackide/modes.hpp
-        include/stackide/options.hpp
-        include/stackide/quad_resources.hpp
-        include/stackide/scope_exit.hpp
+# 3. Modules
+add_library(stackide_base STATIC
+        src/base/options.cpp
+        src/base/include/stackide/base/constants.hpp
+        src/base/include/stackide/base/log.hpp
+        src/base/include/stackide/base/options.hpp
+        src/base/include/stackide/base/scope_exit.hpp
 )
-target_link_libraries(stackide PRIVATE SDL3::SDL3 stackide_warnings)
-target_include_directories(stackide PRIVATE include "${STACKIDE_SHADER_INCLUDE_DIR}")
+target_include_directories(stackide_base PUBLIC src/base/include)
+target_link_libraries(stackide_base PRIVATE stackide_warnings)
 
-stackide_add_shader(stackide shaders/quad.vert.glsl vert kQuadVertSpv)
-stackide_add_shader(stackide shaders/quad.frag.glsl frag kQuadFragSpv)
+# The SIMD baseline from docs/hardware-environment.md. NEON is implied on ARM64.
+# Public so every stackide target agrees, and constants.hpp fails the build otherwise.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    target_compile_options(stackide_base PUBLIC -mavx2)
+endif()
 
-# add_subdirectory(src)
+# A sanitizer finding has to fail the run, not scroll past it.
+if(STACKIDE_SANITIZE)
+    target_compile_options(stackide_base PUBLIC -fno-sanitize-recover=all)
+endif()
+
+add_library(stackide_profile STATIC
+        src/profile/percentile.cpp
+        src/profile/include/stackide/profile/percentile.hpp
+)
+target_include_directories(stackide_profile PUBLIC src/profile/include)
+target_link_libraries(stackide_profile
+        PUBLIC stackide_base Tracy::TracyClient
+        PRIVATE stackide_warnings)
+
+add_library(stackide_render STATIC
+        src/render/quad_resources.cpp
+        src/render/run_offscreen.cpp
+        src/render/run_windowed.cpp
+        src/render/include/stackide/render/modes.hpp
+        src/render/include/stackide/render/quad_resources.hpp
+        src/render/include/stackide/render/render_constants.hpp
+)
+target_include_directories(stackide_render
+        PUBLIC src/render/include
+        PRIVATE "${STACKIDE_SHADER_INCLUDE_DIR}")
+target_link_libraries(stackide_render
+        PUBLIC stackide_base SDL3::SDL3
+        PRIVATE stackide_profile stackide_warnings)
+
+stackide_add_shader(stackide_render shaders/quad.vert.glsl vert kQuadVertSpv)
+stackide_add_shader(stackide_render shaders/quad.frag.glsl frag kQuadFragSpv)
+
+add_executable(stackide src/app/main.cpp)
+target_link_libraries(stackide PRIVATE stackide_render stackide_warnings)
 
 # 4. Testing Configuration
 if(STACKIDE_BUILD_TESTS)

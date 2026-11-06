@@ -49,6 +49,35 @@
       "name": "clang-release",
       "inherits": "clang-toolchain",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+
+    {
+      "name": "asan",
+      "hidden": true,
+      "cacheVariables": { "STACKIDE_SANITIZE": "address,undefined" }
+    },
+    {
+      "name": "tsan",
+      "hidden": true,
+      "cacheVariables": { "STACKIDE_SANITIZE": "thread" }
+    },
+    { "name": "gcc-asan", "inherits": ["asan", "gcc-toolchain"] },
+    { "name": "gcc-tsan", "inherits": ["tsan", "gcc-toolchain"] },
+    { "name": "clang-asan", "inherits": ["asan", "clang-toolchain"] },
+    { "name": "clang-tsan", "inherits": ["tsan", "clang-toolchain"] },
+
+    {
+      "name": "macos",
+      "displayName": "macOS ARM64 compile check. Set LLVM_ROOT to an LLVM 23 install.",
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "$env{LLVM_ROOT}/bin/clang++",
+        "CMAKE_C_COMPILER": "$env{LLVM_ROOT}/bin/clang",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-L$env{LLVM_ROOT}/lib/c++ -L$env{LLVM_ROOT}/lib -Wl,-rpath,$env{LLVM_ROOT}/lib/c++ -Wl,-rpath,$env{LLVM_ROOT}/lib",
+        "STACKIDE_BUILD_TESTS": "OFF"
+      }
     }
   ],
 
@@ -56,7 +85,12 @@
     { "name": "gcc", "configurePreset": "gcc" },
     { "name": "clang", "configurePreset": "clang" },
     { "name": "gcc-release", "configurePreset": "gcc-release" },
-    { "name": "clang-release", "configurePreset": "clang-release" }
+    { "name": "clang-release", "configurePreset": "clang-release" },
+    { "name": "gcc-asan", "configurePreset": "gcc-asan" },
+    { "name": "gcc-tsan", "configurePreset": "gcc-tsan" },
+    { "name": "clang-asan", "configurePreset": "clang-asan" },
+    { "name": "clang-tsan", "configurePreset": "clang-tsan" },
+    { "name": "macos", "configurePreset": "macos" }
   ],
 
   "testPresets": [
@@ -82,6 +116,17 @@
     { "name": "ci-gcc", "inherits": "ci", "configurePreset": "gcc" },
     { "name": "ci-clang", "inherits": "ci", "configurePreset": "clang" },
     { "name": "ci-gcc-release", "inherits": "ci", "configurePreset": "gcc-release" },
-    { "name": "ci-clang-release", "inherits": "ci", "configurePreset": "clang-release" }
+    { "name": "ci-clang-release", "inherits": "ci", "configurePreset": "clang-release" },
+
+    {
+      "name": "tsan-unit",
+      "hidden": true,
+      "inherits": "all",
+      "filter": { "include": { "label": "unit" } }
+    },
+    { "name": "ci-gcc-asan", "inherits": "ci", "configurePreset": "gcc-asan" },
+    { "name": "ci-clang-asan", "inherits": "ci", "configurePreset": "clang-asan" },
+    { "name": "ci-gcc-tsan", "inherits": "tsan-unit", "configurePreset": "gcc-tsan" },
+    { "name": "ci-clang-tsan", "inherits": "tsan-unit", "configurePreset": "clang-tsan" }
   ]
 }

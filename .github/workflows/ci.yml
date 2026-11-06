@@ -7,9 +7,50 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [ gcc, clang, gcc-release, clang-release ]
+        preset:
+          - gcc
+          - clang
+          - gcc-release
+          - clang-release
+          - gcc-asan
+          - clang-asan
+          - gcc-tsan
+          - clang-tsan
     steps:
       - uses: actions/checkout@v5
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
       - run: ctest --preset ci-${{ matrix.preset }}
+
+  lint:
+    runs-on: ubuntu-latest
+    container: ghcr.io/brandondhaskell/stackide-toolchain:gcc16.2.0-llvm23.1.1-glslang15.1.0-1.4.309.0-1
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake --preset clang
+      - run: cmake --build --preset clang --target format-check tidy
+
+  # Compile check only: rendering on macOS needs Metal shaders, which don't exist yet.
+  macos:
+    runs-on: macos-latest
+    env:
+      LLVM_VERSION: 23.1.1
+      LLVM_SHA256: 64220f1c99132ef7e580447781b84f96fbba6862a43a8f6522b423052cd67502
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install glslang ninja
+      - run: echo "LLVM_ROOT=$HOME/llvm-$LLVM_VERSION" >> "$GITHUB_ENV"
+      - id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-${{ env.LLVM_VERSION }}
+          key: llvm-${{ env.LLVM_VERSION }}-macos-arm64
+      - if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          archive="LLVM-$LLVM_VERSION-macOS-ARM64.tar.xz"
+          curl -fsSL -o "$archive" "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/$archive"
+          echo "$LLVM_SHA256  $archive" | shasum -a 256 -c -
+          mkdir -p "$LLVM_ROOT"
+          tar -xf "$archive" -C "$LLVM_ROOT" --strip-components=1
+      - run: cmake --preset macos
+      - run: cmake --build --preset macos
