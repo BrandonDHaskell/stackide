@@ -314,3 +314,26 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT STACKIDE_SANITIZE)
     add_test(NAME bench.log_call_gate COMMAND stackide_log_bench --assert-under-ns 50)
     set_tests_properties(bench.log_call_gate PROPERTIES LABELS "gate")
 endif()
+
+# ---------------------------------------------------------------------------
+# Leak reports from code that draws. Mesa isn't built with frame pointers, so ASan's fast
+# unwinder stops at the driver, and an intermittent leak there can't be attributed. The
+# full unwinder and a symbolizer make the next one say where it came from. Frames in a
+# driver that has since been unloaded still show as unknown, but their callers don't.
+# Limited to these tests because full unwinding makes every allocation much slower.
+# ---------------------------------------------------------------------------
+if(STACKIDE_SANITIZE MATCHES "address")
+    get_filename_component(STACKIDE_COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(STACKIDE_LLVM_SYMBOLIZER llvm-symbolizer HINTS "${STACKIDE_COMPILER_DIR}")
+
+    set(STACKIDE_DRAWING_TESTS smoke.offscreen smoke.offscreen_validated gpu.upload_ring gpu.validation_gate)
+    set_property(TEST ${STACKIDE_DRAWING_TESTS} APPEND PROPERTY
+            ENVIRONMENT_MODIFICATION "ASAN_OPTIONS=string_append:fast_unwind_on_malloc=0:")
+    if(STACKIDE_LLVM_SYMBOLIZER)
+        set_property(TEST ${STACKIDE_DRAWING_TESTS} APPEND PROPERTY
+                ENVIRONMENT_MODIFICATION "ASAN_SYMBOLIZER_PATH=set:${STACKIDE_LLVM_SYMBOLIZER}")
+    endif()
+    # Full unwinding through JIT-compiled shaders can take these from under a second to
+    # tens of seconds on a small CI runner, which mustn't turn into a timeout.
+    set_tests_properties(${STACKIDE_DRAWING_TESTS} PROPERTIES TIMEOUT ${STACKIDE_UNIT_TIMEOUT})
+endif()
