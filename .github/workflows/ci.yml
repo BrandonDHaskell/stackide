@@ -14,8 +14,23 @@ jobs:
           - clang-release
           - gcc-asan
           - clang-asan
-          - gcc-tsan
-          - clang-tsan
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake --preset ${{ matrix.preset }}
+      - run: cmake --build --preset ${{ matrix.preset }}
+      - run: ctest --preset ci-${{ matrix.preset }}
+
+  # TSan can't run under the runner's high ASLR entropy. Its fallback is to re-exec
+  # with ASLR disabled, which Docker's default seccomp profile blocks.
+  tsan:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/brandondhaskell/stackide-toolchain:gcc16.2.0-llvm23.1.1-glslang15.1.0-1.4.309.0-1
+      options: --security-opt seccomp=unconfined
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [gcc-tsan, clang-tsan]
     steps:
       - uses: actions/checkout@v5
       - run: cmake --preset ${{ matrix.preset }}
@@ -54,3 +69,9 @@ jobs:
           tar -xf "$archive" -C "$LLVM_ROOT" --strip-components=1
       - run: cmake --preset macos
       - run: cmake --build --preset macos
+      - name: Show why configuration failed
+        if: failure()
+        run: |
+          find "$LLVM_ROOT" \( -name 'libc++*.dylib' -o -name 'libc++.a' -o -name 'libunwind*.dylib' \)
+          xcrun --show-sdk-path
+          grep -E 'error:|ld:|fatal|undefined|not found' build/macos/CMakeFiles/CMakeConfigureLog.yaml | sort -u | head -40

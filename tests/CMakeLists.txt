@@ -8,6 +8,7 @@
 #   gpu      requires a working GPU backend (Vulkan, or lavapipe in CI)
 #   display  requires a window system (never runs on a stock CI runner)
 #   unit     Catch2 tests with no GPU or window
+#   build    checks on the build system itself
 #
 # Exit code 77 means "skipped" and is honored via SKIP_RETURN_CODE below.
 
@@ -177,3 +178,20 @@ target_link_libraries(stackide_unit_tests PRIVATE
         stackide_base stackide_profile stackide_warnings Catch2::Catch2WithMain)
 add_test(NAME unit COMMAND stackide_unit_tests)
 set_tests_properties(unit PROPERTIES LABELS "unit")
+
+# ---------------------------------------------------------------------------
+# Module boundary check (docs/adr/0001-ui-core-split.md), run against fake targets.
+# Rejections match the error text, since any configure failure would satisfy
+# WILL_FAIL, including a broken fixture.
+# ---------------------------------------------------------------------------
+function(stackide_add_boundary_test case)
+    add_test(NAME boundary.${case}
+            COMMAND "${CMAKE_COMMAND}" --fresh -G "${CMAKE_GENERATOR}" -S "${CMAKE_CURRENT_SOURCE_DIR}/boundary"
+                    -B "${CMAKE_CURRENT_BINARY_DIR}/boundary/${case}" -DCASE=${case})
+    set_tests_properties(boundary.${case} PROPERTIES LABELS "build" ${ARGN})
+endfunction()
+
+stackide_add_boundary_test(clean)
+foreach(case direct transitive link_only alias)
+    stackide_add_boundary_test(${case} PASS_REGULAR_EXPRESSION "core must not link")
+endforeach()

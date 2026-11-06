@@ -55,6 +55,14 @@ target_link_libraries(stackide_profile
         PUBLIC stackide_base Tracy::TracyClient
         PRIVATE stackide_warnings)
 
+# Never links SDL or UI code: see docs/adr/0001-ui-core-split.md.
+add_library(stackide_core STATIC
+        src/core/messages.cpp
+        src/core/include/stackide/core/messages.hpp
+)
+target_include_directories(stackide_core PUBLIC src/core/include)
+target_link_libraries(stackide_core PRIVATE stackide_warnings)
+
 add_library(stackide_render STATIC
         src/render/quad_resources.cpp
         src/render/run_offscreen.cpp
@@ -75,6 +83,11 @@ stackide_add_shader(stackide_render shaders/quad.frag.glsl frag kQuadFragSpv)
 
 add_executable(stackide src/app/main.cpp)
 target_link_libraries(stackide PRIVATE stackide_render stackide_warnings)
+
+include(Boundaries)
+foreach(sdl_free_module stackide_base stackide_profile stackide_core)
+    stackide_forbid_links(${sdl_free_module} "^(-l)?SDL3|^stackide_(render|platform)$")
+endforeach()
 
 # 4. Testing Configuration
 if(STACKIDE_BUILD_TESTS)
