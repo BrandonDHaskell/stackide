@@ -370,14 +370,49 @@ if(STACKIDE_SANITIZE MATCHES "address")
     get_filename_component(STACKIDE_COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     find_program(STACKIDE_LLVM_SYMBOLIZER llvm-symbolizer HINTS "${STACKIDE_COMPILER_DIR}")
 
+    # A real window through to a clean exit (#129). Offscreen is covered by smoke.offscreen.
+    add_test(NAME smoke.windowed_asan
+            COMMAND stackide --frames 120 --timeout-ms 120000)
+    set_tests_properties(smoke.windowed_asan PROPERTIES
+            LABELS "smoke;gpu;display"
+            RESOURCE_LOCK gpu)
+
     set(STACKIDE_DRAWING_TESTS smoke.offscreen smoke.offscreen_validated smoke.profile_report_offscreen gpu.upload_ring
-            gpu.validation_gate gpu.frame_graph)
+            gpu.validation_gate gpu.frame_graph smoke.windowed_asan)
     set_property(TEST ${STACKIDE_DRAWING_TESTS} APPEND PROPERTY
-            ENVIRONMENT_MODIFICATION "ASAN_OPTIONS=string_append:fast_unwind_on_malloc=0:")
+            ENVIRONMENT_MODIFICATION "ASAN_OPTIONS=string_append:fast_unwind_on_malloc=0:"
+            "LSAN_OPTIONS=set:suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
     if(STACKIDE_LLVM_SYMBOLIZER)
         set_property(TEST ${STACKIDE_DRAWING_TESTS} APPEND PROPERTY
                 ENVIRONMENT_MODIFICATION "ASAN_SYMBOLIZER_PATH=set:${STACKIDE_LLVM_SYMBOLIZER}")
     endif()
+
+    # The Vulkan loader opens every installed driver, even one the run won't use, and RADV
+    # leaks on a thread of its own. It unloads before the leak report, so a suppression can't
+    # name it. Loading only the driver for the primary GPU avoids it. Nothing is selected
+    # where that driver isn't installed, as in the toolchain container.
+    set(STACKIDE_ICD_DIR /usr/share/vulkan/icd.d)
+    file(GLOB STACKIDE_GPU_DEVICES LIST_DIRECTORIES true /sys/class/drm/card*/device)
+    foreach(device IN LISTS STACKIDE_GPU_DEVICES)
+        if(NOT EXISTS "${device}/boot_vga" OR NOT EXISTS "${device}/vendor")
+            continue()
+        endif()
+        file(READ "${device}/boot_vga" boot_vga)
+        if(NOT boot_vga MATCHES "^1")
+            continue()
+        endif()
+        file(READ "${device}/vendor" gpu_vendor)
+        string(STRIP "${gpu_vendor}" gpu_vendor)
+        set(STACKIDE_ICD_0x10de nvidia_icd.json)
+        set(STACKIDE_ICD_0x8086 intel_icd.json)
+        set(STACKIDE_ICD_0x1002 radeon_icd.json)
+        set(icd "${STACKIDE_ICD_DIR}/${STACKIDE_ICD_${gpu_vendor}}")
+        if(STACKIDE_ICD_${gpu_vendor} AND EXISTS "${icd}")
+            set_property(TEST ${STACKIDE_DRAWING_TESTS} APPEND PROPERTY
+                    ENVIRONMENT_MODIFICATION "VK_DRIVER_FILES=set:${icd}")
+        endif()
+        break()
+    endforeach()
     # Full unwinding through JIT-compiled shaders can take these from under a second to
     # tens of seconds on a small CI runner, which mustn't turn into a timeout.
     set_tests_properties(${STACKIDE_DRAWING_TESTS} PROPERTIES TIMEOUT ${STACKIDE_UNIT_TIMEOUT})
