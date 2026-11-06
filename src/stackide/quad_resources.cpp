@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <print>
@@ -22,17 +23,23 @@ struct Vertex {
 // Unit quad in clip space. Aspect-ratio scaling is applied via the vertex
 // shader's uniform (see kIdentityScale below; real letterboxing lands with
 // resize handling), not baked into these positions.
-inline constexpr Vertex kQuadVertices[] = {
-    {-1.0f, -1.0f, 0.0f, 1.0f},
-    {1.0f, -1.0f, 1.0f, 1.0f},
-    {1.0f, 1.0f, 1.0f, 0.0f},
-    {-1.0f, 1.0f, 0.0f, 0.0f},
+inline constexpr std::array<Vertex, 4> kQuadVertices = {{
+    {.x = -1.0F, .y = -1.0F, .u = 0.0F, .v = 1.0F},
+    {.x = 1.0F, .y = -1.0F, .u = 1.0F, .v = 1.0F},
+    {.x = 1.0F, .y = 1.0F, .u = 1.0F, .v = 0.0F},
+    {.x = -1.0F, .y = 1.0F, .u = 0.0F, .v = 0.0F},
+},
 };
 
-inline constexpr Uint16 kQuadIndices[] = {0, 1, 2, 0, 2, 3};
+inline constexpr std::array<Uint16, 6> kQuadIndices = {0, 1, 2, 0, 2, 3};
 
 } // namespace
 
+// `size` and `cell` are pixel counts on unrelated scales (texture dimension
+// vs. checker-cell dimension) and are never used positionally elsewhere, so
+// a swap would be an obvious value-out-of-range bug at the call site rather
+// than a silent one.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 std::vector<std::uint8_t> make_checkerboard(int size, int cell,
                                             std::array<std::uint8_t, 4> light,
                                             std::array<std::uint8_t, 4> dark) {
@@ -41,23 +48,33 @@ std::vector<std::uint8_t> make_checkerboard(int size, int cell,
         for (int x = 0; x < size; ++x) {
             const bool is_light = ((x / cell) + (y / cell)) % 2 == 0;
             const auto& c = is_light ? light : dark;
-            const auto idx = (static_cast<std::size_t>(y) * static_cast<std::size_t>(size) +
+            const auto idx = ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size)) +
                               static_cast<std::size_t>(x)) * 4;
-            pixels[idx + 0] = c[0];
-            pixels[idx + 1] = c[1];
-            pixels[idx + 2] = c[2];
-            pixels[idx + 3] = c[3];
+            pixels.at(idx + 0) = c.at(0);
+            pixels.at(idx + 1) = c.at(1);
+            pixels.at(idx + 2) = c.at(2);
+            pixels.at(idx + 3) = c.at(3);
         }
     }
     return pixels;
 }
 
 void destroy_quad_resources(SDL_GPUDevice* gpu, const QuadResources& res) {
-    if (res.pipeline) SDL_ReleaseGPUGraphicsPipeline(gpu, res.pipeline);
-    if (res.sampler) SDL_ReleaseGPUSampler(gpu, res.sampler);
-    if (res.texture) SDL_ReleaseGPUTexture(gpu, res.texture);
-    if (res.vertex_buffer) SDL_ReleaseGPUBuffer(gpu, res.vertex_buffer);
-    if (res.index_buffer) SDL_ReleaseGPUBuffer(gpu, res.index_buffer);
+    if (res.pipeline != nullptr) {
+        SDL_ReleaseGPUGraphicsPipeline(gpu, res.pipeline);
+    }
+    if (res.sampler != nullptr) {
+        SDL_ReleaseGPUSampler(gpu, res.sampler);
+    }
+    if (res.texture != nullptr) {
+        SDL_ReleaseGPUTexture(gpu, res.texture);
+    }
+    if (res.vertex_buffer != nullptr) {
+        SDL_ReleaseGPUBuffer(gpu, res.vertex_buffer);
+    }
+    if (res.index_buffer != nullptr) {
+        SDL_ReleaseGPUBuffer(gpu, res.index_buffer);
+    }
 }
 
 std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
@@ -70,7 +87,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     vert_info.stage = SDL_GPU_SHADERSTAGE_VERTEX;
     vert_info.num_uniform_buffers = 1;
     SDL_GPUShader* vert_shader = SDL_CreateGPUShader(gpu, &vert_info);
-    if (!vert_shader) {
+    if (vert_shader == nullptr) {
         std::println(stderr, "SDL_CreateGPUShader (vertex) failed: {}", SDL_GetError());
         return std::nullopt;
     }
@@ -84,7 +101,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     frag_info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
     frag_info.num_samplers = 1;
     SDL_GPUShader* frag_shader = SDL_CreateGPUShader(gpu, &frag_info);
-    if (!frag_shader) {
+    if (frag_shader == nullptr) {
         std::println(stderr, "SDL_CreateGPUShader (fragment) failed: {}", SDL_GetError());
         return std::nullopt;
     }
@@ -97,7 +114,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     vb_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
     vb_info.size = kVertexBytes;
     SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(gpu, &vb_info);
-    if (!vertex_buffer) {
+    if (vertex_buffer == nullptr) {
         std::println(stderr, "SDL_CreateGPUBuffer (vertex) failed: {}", SDL_GetError());
         return std::nullopt;
     }
@@ -107,7 +124,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     ib_info.usage = SDL_GPU_BUFFERUSAGE_INDEX;
     ib_info.size = kIndexBytes;
     SDL_GPUBuffer* index_buffer = SDL_CreateGPUBuffer(gpu, &ib_info);
-    if (!index_buffer) {
+    if (index_buffer == nullptr) {
         std::println(stderr, "SDL_CreateGPUBuffer (index) failed: {}", SDL_GetError());
         return std::nullopt;
     }
@@ -131,7 +148,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     tex_info.num_levels = 1;
     tex_info.sample_count = SDL_GPU_SAMPLECOUNT_1;
     SDL_GPUTexture* texture = SDL_CreateGPUTexture(gpu, &tex_info);
-    if (!texture) {
+    if (texture == nullptr) {
         std::println(stderr, "SDL_CreateGPUTexture (checkerboard) failed: {}", SDL_GetError());
         return std::nullopt;
     }
@@ -142,41 +159,41 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     tb_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     tb_info.size = upload_size;
     SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(gpu, &tb_info);
-    if (!transfer) {
+    if (transfer == nullptr) {
         std::println(stderr, "SDL_CreateGPUTransferBuffer (upload) failed: {}", SDL_GetError());
         return std::nullopt;
     }
     ScopeExit destroy_transfer{[gpu, transfer] { SDL_ReleaseGPUTransferBuffer(gpu, transfer); }};
 
     auto* mapped = static_cast<std::uint8_t*>(SDL_MapGPUTransferBuffer(gpu, transfer, false));
-    if (!mapped) {
+    if (mapped == nullptr) {
         std::println(stderr, "SDL_MapGPUTransferBuffer (upload) failed: {}", SDL_GetError());
         return std::nullopt;
     }
-    std::memcpy(mapped, kQuadVertices, kVertexBytes);
-    std::memcpy(mapped + kVertexBytes, kQuadIndices, kIndexBytes);
+    std::memcpy(mapped, kQuadVertices.data(), kVertexBytes);
+    std::memcpy(mapped + kVertexBytes, kQuadIndices.data(), kIndexBytes);
     std::memcpy(mapped + kVertexBytes + kIndexBytes, checker.data(), checker_bytes);
     SDL_UnmapGPUTransferBuffer(gpu, transfer);
 
     SDL_GPUCommandBuffer* upload_cmd = SDL_AcquireGPUCommandBuffer(gpu);
-    if (!upload_cmd) {
+    if (upload_cmd == nullptr) {
         std::println(stderr, "SDL_AcquireGPUCommandBuffer (upload) failed: {}", SDL_GetError());
         return std::nullopt;
     }
 
     SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(upload_cmd);
-    if (!copy) {
+    if (copy == nullptr) {
         std::println(stderr, "SDL_BeginGPUCopyPass (upload) failed: {}", SDL_GetError());
         SDL_CancelGPUCommandBuffer(upload_cmd);
         return std::nullopt;
     }
 
-    const SDL_GPUTransferBufferLocation vb_src{transfer, 0};
-    const SDL_GPUBufferRegion vb_dst{vertex_buffer, 0, kVertexBytes};
+    const SDL_GPUTransferBufferLocation vb_src{.transfer_buffer = transfer, .offset = 0};
+    const SDL_GPUBufferRegion vb_dst{.buffer = vertex_buffer, .offset = 0, .size = kVertexBytes};
     SDL_UploadToGPUBuffer(copy, &vb_src, &vb_dst, false);
 
-    const SDL_GPUTransferBufferLocation ib_src{transfer, kVertexBytes};
-    const SDL_GPUBufferRegion ib_dst{index_buffer, 0, kIndexBytes};
+    const SDL_GPUTransferBufferLocation ib_src{.transfer_buffer = transfer, .offset = kVertexBytes};
+    const SDL_GPUBufferRegion ib_dst{.buffer = index_buffer, .offset = 0, .size = kIndexBytes};
     SDL_UploadToGPUBuffer(copy, &ib_src, &ib_dst, false);
 
     SDL_GPUTextureTransferInfo tex_src{};
@@ -210,7 +227,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     // alongside this) check exact bytes on each side of a checker boundary,
     // which linear filtering would blend across.
     SDL_GPUSampler* sampler = SDL_CreateGPUSampler(gpu, &sampler_info);
-    if (!sampler) {
+    if (sampler == nullptr) {
         std::println(stderr, "SDL_CreateGPUSampler failed: {}", SDL_GetError());
         return std::nullopt;
     }
@@ -222,15 +239,20 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
         .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
         .instance_step_rate = 0,
     };
-    const SDL_GPUVertexAttribute attrs[2] = {
-        {.location = 0,
-         .buffer_slot = 0,
-         .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
-         .offset = offsetof(Vertex, x)},
-        {.location = 1,
-         .buffer_slot = 0,
-         .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
-         .offset = offsetof(Vertex, u)},
+    const std::array<SDL_GPUVertexAttribute, 2> attrs = {{
+        {
+            .location = 0,
+            .buffer_slot = 0,
+            .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
+            .offset = offsetof(Vertex, x),
+        },
+        {
+            .location = 1,
+            .buffer_slot = 0,
+            .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
+            .offset = offsetof(Vertex, u),
+        },
+    },
     };
 
     SDL_GPUColorTargetDescription color_target{};
@@ -242,7 +264,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     pipeline_info.fragment_shader = frag_shader;
     pipeline_info.vertex_input_state.vertex_buffer_descriptions = &vb_desc;
     pipeline_info.vertex_input_state.num_vertex_buffers = 1;
-    pipeline_info.vertex_input_state.vertex_attributes = attrs;
+    pipeline_info.vertex_input_state.vertex_attributes = attrs.data();
     pipeline_info.vertex_input_state.num_vertex_attributes = 2;
     pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
@@ -254,7 +276,7 @@ std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu,
     pipeline_info.target_info.has_depth_stencil_target = false;
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &pipeline_info);
-    if (!pipeline) {
+    if (pipeline == nullptr) {
         std::println(stderr, "SDL_CreateGPUGraphicsPipeline failed: {}", SDL_GetError());
         return std::nullopt;
     }

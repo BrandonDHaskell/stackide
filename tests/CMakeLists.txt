@@ -46,6 +46,16 @@ set_tests_properties(smoke.windowed PROPERTIES
         RESOURCE_LOCK gpu)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.windowed)
 
+# M1 item 8: a programmatic resize mid-run must not crash. Aspect-ratio
+# correctness itself is a manual/visual check, not asserted here.
+add_test(NAME smoke.resize
+        COMMAND stackide --frames 30 --timeout-ms 10000
+                --resize-after-frames 10 --resize-width 640 --resize-height 480)
+set_tests_properties(smoke.resize PROPERTIES
+        LABELS "smoke;gpu;display"
+        RESOURCE_LOCK gpu)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.resize)
+
 # ---------------------------------------------------------------------------
 # Tier 4: timing gates (M1 items 6/7). Local/self-hosted hardware only, same
 # as Tier 3 -- both the frame-cost floor and the live refresh rate are
@@ -123,6 +133,21 @@ set_tests_properties(smoke.rejects_dropped_gate_in_immediate PROPERTIES
         LABELS "smoke"
         WILL_FAIL TRUE)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_dropped_gate_in_immediate)
+
+add_test(NAME smoke.rejects_partial_resize_flags
+        COMMAND stackide --resize-after-frames 10)
+set_tests_properties(smoke.rejects_partial_resize_flags PROPERTIES
+        LABELS "smoke"
+        WILL_FAIL TRUE)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_partial_resize_flags)
+
+add_test(NAME smoke.rejects_resize_in_offscreen
+        COMMAND stackide --offscreen --resize-after-frames 10
+                --resize-width 640 --resize-height 480)
+set_tests_properties(smoke.rejects_resize_in_offscreen PROPERTIES
+        LABELS "smoke"
+        WILL_FAIL TRUE)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.rejects_resize_in_offscreen)
 
 # ---------------------------------------------------------------------------
 # Properties shared by every test above.

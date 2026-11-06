@@ -10,7 +10,13 @@ public:
     explicit ScopeExit(F fn) noexcept : fn_(std::move(fn)) {}
     ScopeExit(const ScopeExit&) = delete;
     ScopeExit& operator=(const ScopeExit&) = delete;
-    ~ScopeExit() { if (armed_) fn_(); }
+    ScopeExit(ScopeExit&&) = delete;
+    ScopeExit& operator=(ScopeExit&&) = delete;
+    ~ScopeExit() {
+        if (armed_) {
+            fn_();
+        }
+    }
     void release() noexcept { armed_ = false; }
 
 private:

@@ -21,6 +21,7 @@
 #include <stackide/scope_exit.hpp>
 
 #include <cstdlib>
+#include <exception>
 #include <print>
 
 namespace stackide {
@@ -46,18 +47,28 @@ int run_headless() {
 } // namespace
 } // namespace stackide
 
+// clang-tidy's static analysis flags std::println itself as a possible
+// format_error throw site, even for the literal, compile-time-validated
+// format strings used below, which the standard guarantees cannot throw at
+// runtime for that reason. There's no reachable path left to catch here.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char** argv) {
-    stackide::Options opts;
-    if (!stackide::parse_args(argc, argv, opts)) {
-        stackide::print_usage();
+    try {
+        stackide::Options opts;
+        if (!stackide::parse_args(argc, argv, opts)) {
+            stackide::print_usage();
+            return EXIT_FAILURE;
+        }
+
+        switch (opts.mode) {
+            case stackide::Mode::Headless:  return stackide::run_headless();
+            case stackide::Mode::Offscreen: return stackide::run_offscreen(opts);
+            case stackide::Mode::Windowed:  return stackide::run_windowed(opts);
+        }
+
+        return EXIT_FAILURE;
+    } catch (const std::exception& e) {
+        std::println(stderr, "unhandled exception: {}", e.what());
         return EXIT_FAILURE;
     }
-
-    switch (opts.mode) {
-        case stackide::Mode::Headless:  return stackide::run_headless();
-        case stackide::Mode::Offscreen: return stackide::run_offscreen(opts);
-        case stackide::Mode::Windowed:  return stackide::run_windowed(opts);
-    }
-
-    return EXIT_FAILURE;
 }

@@ -21,8 +21,8 @@ bool pixel_matches(const std::uint8_t* px, std::array<std::uint8_t, 4> expected)
     const auto near = [](std::uint8_t got, std::uint8_t want) {
         return std::abs(static_cast<int>(got) - static_cast<int>(want)) <= kChannelTolerance;
     };
-    return near(px[0], expected[0]) && near(px[1], expected[1]) &&
-           near(px[2], expected[2]) && near(px[3], expected[3]);
+    return near(px[0], expected.at(0)) && near(px[1], expected.at(1)) &&
+           near(px[2], expected.at(2)) && near(px[3], expected.at(3));
 }
 
 bool check_pixel(const std::uint8_t* pixels, Uint32 offset, std::array<std::uint8_t, 4> expected) {
@@ -34,7 +34,7 @@ bool check_pixel(const std::uint8_t* pixels, Uint32 offset, std::array<std::uint
                  "pixel mismatch at byte {}: got {:02X}{:02X}{:02X}{:02X}, "
                  "expected {:02X}{:02X}{:02X}{:02X}",
                  offset, px[0], px[1], px[2], px[3],
-                 expected[0], expected[1], expected[2], expected[3]);
+                 expected.at(0), expected.at(1), expected.at(2), expected.at(3));
     return false;
 }
 
@@ -56,7 +56,7 @@ int run_offscreen(const Options& opts) {
 
     SDL_GPUDevice* gpu =
         SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, opts.gpu_debug, nullptr);
-    if (!gpu) {
+    if (gpu == nullptr) {
         std::println(stderr, "SDL_CreateGPUDevice failed: {}", SDL_GetError());
         return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
     }
@@ -82,7 +82,7 @@ int run_offscreen(const Options& opts) {
     tex_info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
     SDL_GPUTexture* color = SDL_CreateGPUTexture(gpu, &tex_info);
-    if (!color) {
+    if (color == nullptr) {
         std::println(stderr, "SDL_CreateGPUTexture failed: {}", SDL_GetError());
         return EXIT_FAILURE;
     }
@@ -107,14 +107,14 @@ int run_offscreen(const Options& opts) {
     tb_info.size = kBufferSize;
 
     SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(gpu, &tb_info);
-    if (!transfer) {
+    if (transfer == nullptr) {
         std::println(stderr, "SDL_CreateGPUTransferBuffer failed: {}", SDL_GetError());
         return EXIT_FAILURE;
     }
     ScopeExit destroy_tb{[gpu, transfer] { SDL_ReleaseGPUTransferBuffer(gpu, transfer); }};
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(gpu);
-    if (!cmd) {
+    if (cmd == nullptr) {
         std::println(stderr, "SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
         return EXIT_FAILURE;
     }
@@ -126,7 +126,7 @@ int run_offscreen(const Options& opts) {
     target.store_op = SDL_GPU_STOREOP_STORE;
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &target, 1, nullptr);
-    if (!pass) {
+    if (pass == nullptr) {
         std::println(stderr, "SDL_BeginGPURenderPass failed: {}", SDL_GetError());
         SDL_CancelGPUCommandBuffer(cmd);
         return EXIT_FAILURE;
@@ -134,26 +134,28 @@ int run_offscreen(const Options& opts) {
 
     SDL_BindGPUGraphicsPipeline(pass, quad->pipeline);
 
-    const SDL_GPUBufferBinding vb_binding{quad->vertex_buffer, 0};
+    const SDL_GPUBufferBinding vb_binding{.buffer = quad->vertex_buffer, .offset = 0};
     SDL_BindGPUVertexBuffers(pass, 0, &vb_binding, 1);
 
-    const SDL_GPUBufferBinding ib_binding{quad->index_buffer, 0};
+    const SDL_GPUBufferBinding ib_binding{.buffer = quad->index_buffer, .offset = 0};
     SDL_BindGPUIndexBuffer(pass, &ib_binding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
 
-    const SDL_GPUTextureSamplerBinding tex_binding{quad->texture, quad->sampler};
+    const SDL_GPUTextureSamplerBinding tex_binding{.texture = quad->texture,
+                                                   .sampler = quad->sampler,};
     SDL_BindGPUFragmentSamplers(pass, 0, &tex_binding, 1);
 
     // Identity for now: real aspect-preserving letterboxing lands with
     // resize handling (item 8), which is what this uniform exists for.
-    constexpr float kIdentityScale[2] = {1.0f, 1.0f};
-    SDL_PushGPUVertexUniformData(cmd, 0, kIdentityScale, sizeof(kIdentityScale));
+    constexpr std::array<float, 2> kIdentityScale = {1.0F, 1.0F};
+    SDL_PushGPUVertexUniformData(cmd, 0, kIdentityScale.data(), sizeof(kIdentityScale));
 
-    SDL_DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0);
+    constexpr Uint32 kQuadIndexCount = 6;
+    SDL_DrawGPUIndexedPrimitives(pass, kQuadIndexCount, 1, 0, 0, 0);
 
     SDL_EndGPURenderPass(pass);
 
     SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
-    if (!copy) {
+    if (copy == nullptr) {
         std::println(stderr, "SDL_BeginGPUCopyPass failed: {}", SDL_GetError());
         SDL_CancelGPUCommandBuffer(cmd);
         return EXIT_FAILURE;
@@ -175,7 +177,7 @@ int run_offscreen(const Options& opts) {
     SDL_EndGPUCopyPass(copy);
 
     SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
-    if (!fence) {
+    if (fence == nullptr) {
         std::println(stderr, "SDL_SubmitGPUCommandBufferAndAcquireFence failed: {}",
                      SDL_GetError());
         return EXIT_FAILURE;
@@ -189,7 +191,7 @@ int run_offscreen(const Options& opts) {
 
     auto* pixels = static_cast<std::uint8_t*>(
         SDL_MapGPUTransferBuffer(gpu, transfer, false));
-    if (!pixels) {
+    if (pixels == nullptr) {
         std::println(stderr, "SDL_MapGPUTransferBuffer failed: {}", SDL_GetError());
         return EXIT_FAILURE;
     }
@@ -198,16 +200,17 @@ int run_offscreen(const Options& opts) {
     // Four checker cells, including a boundary pair straddling x=8 on the
     // same row: catches both correct sampling and an off-by-one in the
     // checker's cell math.
-    constexpr Uint32 kBoundaryLightOffset = (7 * kOffscreenWidth + 7) * kPixelBytes;
-    constexpr Uint32 kBoundaryDarkOffset = (7 * kOffscreenWidth + 8) * kPixelBytes;
-    constexpr Uint32 kInteriorOffset = (32 * kOffscreenWidth + 32) * kPixelBytes;
-    constexpr Uint32 kFarCornerOffset = (0 * kOffscreenWidth + 63) * kPixelBytes;
+    constexpr Uint32 kBoundaryLightOffset = ((7 * kOffscreenWidth) + 7) * kPixelBytes;
+    constexpr Uint32 kBoundaryDarkOffset = ((7 * kOffscreenWidth) + 8) * kPixelBytes;
+    constexpr Uint32 kInteriorOffset = ((32 * kOffscreenWidth) + 32) * kPixelBytes;
+    constexpr Uint32 kFarCornerOffset = ((0 * kOffscreenWidth) + 63) * kPixelBytes;
 
-    const std::pair<Uint32, std::array<std::uint8_t, 4>> checks[] = {
+    const std::array<std::pair<Uint32, std::array<std::uint8_t, 4>>, 4> checks = {{
         {kBoundaryLightOffset, kCheckerLight},
         {kBoundaryDarkOffset, kCheckerDark},
         {kInteriorOffset, kCheckerLight},
         {kFarCornerOffset, kCheckerDark},
+    },
     };
 
     for (const auto& [offset, expected] : checks) {

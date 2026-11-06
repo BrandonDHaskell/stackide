@@ -35,18 +35,32 @@ inline constexpr int kExitSkip = 77;
 
 inline constexpr Uint64 kDefaultTimeoutMs = 10'000;
 
+// The sRGB electro-optical transfer function's piecewise-linear constants
+// (IEC 61966-2-1).
+inline constexpr float kSrgbLinearThreshold = 0.04045F;
+inline constexpr float kSrgbLinearSlope = 12.92F;
+inline constexpr float kSrgbGammaOffset = 0.055F;
+inline constexpr float kSrgbGammaScale = 1.055F;
+inline constexpr float kSrgbGamma = 2.4F;
+
 // An _SRGB texture format auto-encodes a shader's linear float output to its
 // sRGB-encoded byte storage. To keep the clear assertion's expected bytes
 // (kClearR/G/B/A) exactly as they are, the clear color fed to SDL has to be
 // the *decoded* linear value that round-trips back through that encode.
 inline float srgb_decode(std::uint8_t v) noexcept {
-    const float c = static_cast<float>(v) / 255.0f;
-    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+    const float c = static_cast<float>(v) / 255.0F;
+    return c <= kSrgbLinearThreshold
+               ? c / kSrgbLinearSlope
+               : std::pow((c + kSrgbGammaOffset) / kSrgbGammaScale, kSrgbGamma);
 }
 
 inline SDL_FColor clear_color() noexcept {
-    return SDL_FColor{srgb_decode(kClearR), srgb_decode(kClearG), srgb_decode(kClearB),
-                       srgb_decode(kClearA)};
+    return SDL_FColor{
+        .r = srgb_decode(kClearR),
+        .g = srgb_decode(kClearG),
+        .b = srgb_decode(kClearB),
+        .a = srgb_decode(kClearA),
+    };
 }
 
 } // namespace stackide
