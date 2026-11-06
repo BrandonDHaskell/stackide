@@ -101,14 +101,18 @@ namespace stackide
                 std::chrono::duration_cast<std::chrono::nanoseconds>(since_epoch).count());
         }
 
-        // Takes the next live record, returning false once the ring is empty. Lost
+        // Takes the next live record before stop_at, returning false once there are none. Lost
         // records are added to dropped. Only one thread may read a ring at a time.
-        bool read_record(Ring& ring, Record& out, std::uint64_t& dropped) noexcept
+        //
+        // Bounded so that a reader can finish: a producer that writes as fast as this reads
+        // would otherwise keep the ring from ever looking empty, so that a drain never ended
+        // and its batch grew without limit.
+        bool read_record(Ring& ring, std::uint64_t stop_at, Record& out, std::uint64_t& dropped) noexcept
         {
             while (true)
             {
                 const std::uint64_t written = ring.write_index.load(std::memory_order_acquire);
-                if (ring.read_index >= written)
+                if (ring.read_index >= written || ring.read_index >= stop_at)
                 {
                     return false;
                 }
@@ -451,7 +455,8 @@ namespace stackide
                 // before the ring can be given to another thread.
                 const bool retired = ring->owner.load(std::memory_order_acquire) == RingOwner::Retired;
                 Record record;
-                while (read_record(*ring, record, dropped))
+                const std::uint64_t stop_at = ring->write_index.load(std::memory_order_acquire);
+                while (read_record(*ring, stop_at, record, dropped))
                 {
                     batch.push_back(record);
                 }
@@ -550,7 +555,8 @@ namespace stackide
             for (Ring* ring = state.rings.load(std::memory_order_acquire); ring != nullptr; ring = ring->next)
             {
                 Record record;
-                while (read_record(*ring, record, dropped))
+                const std::uint64_t stop_at = ring->write_index.load(std::memory_order_acquire);
+                while (read_record(*ring, stop_at, record, dropped))
                 {
                     output(std::string_view{line.data(), format_line(state, record, line)});
                 }

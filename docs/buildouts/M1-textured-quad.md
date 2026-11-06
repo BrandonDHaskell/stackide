@@ -1,6 +1,6 @@
 # Milestone 1: Textured Quad
 
-Status: open
+Status: closed 2026-11-06
 Opened: 2026-09-20
 Owner: Brandon
 

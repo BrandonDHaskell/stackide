@@ -270,6 +270,36 @@ TEST_CASE("records from many short-lived threads all arrive")
     }
 }
 
+// A drain chasing a producer that never pauses must still finish. This hung, with the writer's
+// batch growing without limit, before a drain was bounded to what existed when it began.
+TEST_CASE("log_flush returns while producers flood the log")
+{
+    const TempDir dir;
+    auto config = quiet_config(dir.path());
+    config.max_file_bytes = std::uint64_t{1} << 40U;
+    config.history_bytes = 0;
+    const LogSession session{config};
+
+    std::vector<std::jthread> producers;
+    for (unsigned t = 0; t < std::max(2U, std::thread::hardware_concurrency() / 2); ++t)
+    {
+        producers.emplace_back(
+            [](const std::stop_token& stop)
+            {
+                while (!stop.stop_requested())
+                {
+                    STACKIDE_LOG_INFO(LogCategory::Core, "flooding");
+                }
+            });
+    }
+
+    for (int i = 0; i < 20; ++i)
+    {
+        stackide::log_flush();
+    }
+    SUCCEED();
+}
+
 TEST_CASE("log_flush makes earlier records visible")
 {
     const TempDir dir;
