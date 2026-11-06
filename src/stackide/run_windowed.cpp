@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <print>
@@ -72,11 +73,21 @@ bool poll_quit_requested() {
     return quit;
 }
 
-// Renders and submits one frame. Returns true if a frame reached the
-// swapchain, false if the window was minimized/occluded (not an error, just
-// nothing to present), or nullopt on a real failure.
-std::optional<bool> render_frame(SDL_GPUDevice* gpu, SDL_Window* window,
-                                 const QuadResources& quad) {
+double elapsed_ms(Clock::time_point from, Clock::time_point to) {
+    return std::chrono::duration<double, std::milli>(to - from).count();
+}
+
+struct RenderedFrame {
+    // False if the window was minimized/occluded: not an error, just nothing
+    // to present.
+    bool presented = false;
+    // Under vsync, this is where the wait for the display happens.
+    double swapchain_wait_ms = 0.0;
+};
+
+// Renders and submits one frame. Returns nullopt on a real failure.
+std::optional<RenderedFrame> render_frame(SDL_GPUDevice* gpu, SDL_Window* window,
+                                          const QuadResources& quad) {
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(gpu);
     if (cmd == nullptr) {
         std::println(stderr, "SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
@@ -84,18 +95,20 @@ std::optional<bool> render_frame(SDL_GPUDevice* gpu, SDL_Window* window,
     }
 
     SDL_GPUTexture* swapchain = nullptr;
+    const auto wait_start = Clock::now();
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd, window, &swapchain, nullptr, nullptr)) {
         std::println(stderr, "SDL_WaitAndAcquireGPUSwapchainTexture failed: {}", SDL_GetError());
         // Nothing was acquired, so cancel rather than submit.
         SDL_CancelGPUCommandBuffer(cmd);
         return std::nullopt;
     }
+    const double swapchain_wait_ms = elapsed_ms(wait_start, Clock::now());
 
     if (swapchain == nullptr) {
         // Minimized or occluded: not an error, but no frame was presented.
         SDL_SubmitGPUCommandBuffer(cmd);
         SDL_Delay(kOccludedFrameDelayMs);
-        return false;
+        return RenderedFrame{.presented = false, .swapchain_wait_ms = swapchain_wait_ms};
     }
 
     SDL_GPUColorTargetInfo target{};
@@ -132,26 +145,28 @@ std::optional<bool> render_frame(SDL_GPUDevice* gpu, SDL_Window* window,
 
     SDL_EndGPURenderPass(pass);
     SDL_SubmitGPUCommandBuffer(cmd);
-    return true;
+    return RenderedFrame{.presented = true, .swapchain_wait_ms = swapchain_wait_ms};
 }
+
+enum class WarmupResult : std::uint8_t { Completed, QuitRequested, Failed };
 
 // Absorbs the one-time swapchain/compositor negotiation cost that the first
 // several presented frames pay on a freshly-mapped window (observed: one
 // frame stalling ~2.8x the refresh interval, consistently within the first
 // ~10 frames, regardless of how long the process waits beforehand -- it is
-// tied to frame count, not wall-clock time). Returns false on a render
-// failure.
-bool run_warmup_frames(SDL_GPUDevice* gpu, SDL_Window* window, const QuadResources& quad,
-                       int count) {
+// tied to frame count, not wall-clock time). Polling drains the event queue,
+// so a quit seen here has to be reported or it is lost.
+WarmupResult run_warmup_frames(SDL_GPUDevice* gpu, SDL_Window* window, const QuadResources& quad,
+                               int count) {
     for (int i = 0; i < count; ++i) {
         if (poll_quit_requested()) {
-            return true;
+            return WarmupResult::QuitRequested;
         }
         if (!render_frame(gpu, window, quad)) {
-            return false;
+            return WarmupResult::Failed;
         }
     }
-    return true;
+    return WarmupResult::Completed;
 }
 
 struct FrameStats {
@@ -160,6 +175,19 @@ struct FrameStats {
     int dropped_frames = 0;
     std::vector<double> frame_times_ms;
 };
+
+// The measures are distinct on purpose: cost is what a frame took to build and
+// goes in the percentiles, interval is what the display saw and decides drops.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+void record_presented_frame(FrameStats& stats, double cost_ms, double interval_ms,
+                            double expected_interval_ms) {
+    ++stats.presented;
+    if (expected_interval_ms > 0.0 && stats.presented > 1 &&
+        interval_ms > kDropIntervalMultiplier * expected_interval_ms) {
+        ++stats.dropped_frames;
+    }
+    stats.frame_times_ms.push_back(cost_ms);
+}
 
 // Runs the measured loop: presents frames until quit, --frames is reached,
 // or --timeout-ms elapses, tracking per-frame timing and dropped-frame
@@ -175,31 +203,31 @@ FrameStats run_measured_loop(SDL_GPUDevice* gpu, SDL_Window* window, const QuadR
     bool running = true;
 
     while (running) {
+        const auto frame_start = Clock::now();
+
         if (poll_quit_requested()) {
             break;
         }
 
-        const std::optional<bool> result = render_frame(gpu, window, quad);
-        if (!result) {
+        const std::optional<RenderedFrame> frame = render_frame(gpu, window, quad);
+        if (!frame) {
             stats.exit_code = EXIT_FAILURE;
             break;
         }
 
-        if (*result) {
-            ++stats.presented;
+        if (frame->presented) {
+            const auto now = Clock::now();
+            // Only vsync's wait is excluded. In immediate mode the same wait is
+            // GPU back-pressure, a real cost the frame-cost gate has to see.
+            const double excluded_ms =
+                opts.present_mode == PresentMode::Vsync ? frame->swapchain_wait_ms : 0.0;
+            record_presented_frame(stats, elapsed_ms(frame_start, now) - excluded_ms,
+                                   elapsed_ms(last, now), expected_interval_ms);
+            last = now;
 
             if (opts.resize_after_frames > 0 && stats.presented == opts.resize_after_frames) {
                 SDL_SetWindowSize(window, opts.resize_width, opts.resize_height);
             }
-
-            const auto now = Clock::now();
-            const double delta_ms = std::chrono::duration<double, std::milli>(now - last).count();
-            if (expected_interval_ms > 0.0 && stats.presented > 1 &&
-                delta_ms > kDropIntervalMultiplier * expected_interval_ms) {
-                ++stats.dropped_frames;
-            }
-            stats.frame_times_ms.push_back(delta_ms);
-            last = now;
 
             if (opts.frames > 0 && stats.presented >= opts.frames) {
                 running = false;
@@ -354,11 +382,15 @@ int run_windowed(const Options& opts) {
     ScopeExit destroy_quad{[gpu, res = *quad] { destroy_quad_resources(gpu, res); }};
 
     constexpr int kWarmupFrames = 20;
-    if (!run_warmup_frames(gpu, window, *quad, kWarmupFrames)) {
+    const WarmupResult warmup = run_warmup_frames(gpu, window, *quad, kWarmupFrames);
+    if (warmup == WarmupResult::Failed) {
         return EXIT_FAILURE;
     }
 
-    const FrameStats stats = run_measured_loop(gpu, window, *quad, opts, expected_interval_ms);
+    const FrameStats stats = warmup == WarmupResult::QuitRequested
+                                 ? FrameStats{}
+                                 : run_measured_loop(gpu, window, *quad, opts,
+                                                     expected_interval_ms);
     return report_and_gate(opts, stats, expected_interval_ms);
 }
 

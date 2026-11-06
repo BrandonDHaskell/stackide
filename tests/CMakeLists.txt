@@ -36,6 +36,15 @@ set_tests_properties(smoke.offscreen PROPERTIES
         RESOURCE_LOCK gpu)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.offscreen)
 
+# STACKIDE_REQUIRE_GPU must turn a skip into a failure. Checks for exit 1
+# exactly, because WILL_FAIL would also accept the skip code this guards against.
+add_test(NAME smoke.require_gpu_rejects_skip
+        COMMAND sh -c "\"$<TARGET_FILE:stackide>\" --offscreen --allow-skip; test $? -eq 1")
+set_tests_properties(smoke.require_gpu_rejects_skip PROPERTIES
+        LABELS "smoke"
+        ENVIRONMENT "STACKIDE_REQUIRE_GPU=1;SDL_GPU_DRIVER=stackide-no-such-driver")
+list(APPEND STACKIDE_SMOKE_TESTS smoke.require_gpu_rejects_skip)
+
 # ---------------------------------------------------------------------------
 # Tier 3: window plus swapchain. Local and self-hosted runners only.
 # ---------------------------------------------------------------------------

@@ -21,12 +21,15 @@ Never invoke compilers directly. Always use presets.
     cmake --preset clang && cmake --build --preset clang  # secondary, ABI check
     ctest --preset gcc
 
-Headless variants for container and CI: `ci-gcc`, `ci-clang`.
+`ci-gcc` and `ci-clang` are test presets only. They use the `gcc` and `clang`
+builds, exclude display tests, and treat a GPU skip as a failure.
 
-Verify in the container before pushing:
+Verify in the container before pushing. This builds in a copy inside the
+container, because a CMake cache can't be shared between host and container paths:
 
-    docker run --rm -u "$(id -u):$(id -g)" -v ~/Projects/stackide:/w -w /w \
-      stackide-toolchain bash -c 'cmake --preset ci-gcc && cmake --build --preset ci-gcc && ctest --preset ci-gcc'
+    IMAGE=$(sed -n 's/.*container: //p' .github/workflows/ci.yml)
+    docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/w:ro "$IMAGE" bash -c \
+      'mkdir /tmp/w && tar -C /w --exclude=./build --exclude=./.git -cf - . | tar -xf - -C /tmp/w && cd /tmp/w && cmake --preset gcc && cmake --build --preset gcc && ctest --preset ci-gcc'
 
 ## Toolchain
 
@@ -53,8 +56,6 @@ Do not "fix" these:
 - clangd consteval / `_M_bf16` squiggles on `std::println`: CLion's bundled clangd
   parsing libstdc++ headers. GCC compiles them. Deferred until CLion supports
   Clang 23's driver.
-- `SDL_CreateGPUDevice failed: No supported SDL_GPU backend found!` with exit 0
-  under `--smoke`: intended. No Vulkan in the container.
 - CLion runs the gcc profile only. Clang 23 breaks CLion's compiler probe.
 
 ## Constraints
@@ -73,3 +74,6 @@ Do not "fix" these:
   testing what CI will see; mount the working tree directly when iterating.
 - Always pass `-u "$(id -u):$(id -g)"` to docker run with a mounted tree,
   or you get root-owned files in your source tree.
+- The toolchain image sets `SDL_VIDEODRIVER=dummy`, which beats a normal
+  `SDL_SetHint`. A mode that needs a specific video driver must set the hint with
+  `SDL_HINT_OVERRIDE`. The container renders on lavapipe (software Vulkan).

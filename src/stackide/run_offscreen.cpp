@@ -45,8 +45,9 @@ int run_offscreen(const Options& opts) {
     // display server, but it still has to be the "offscreen" driver rather
     // than "dummy": dummy never wires up Vulkan_CreateSurface, so
     // SDL_CreateGPUDevice fails unconditionally under it regardless of
-    // hardware availability.
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+    // hardware availability. Override priority because SDL_VIDEODRIVER would
+    // otherwise win, and the toolchain image sets it to dummy.
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "offscreen", SDL_HINT_OVERRIDE);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::println(stderr, "SDL_Init failed: {}", SDL_GetError());

@@ -32,7 +32,8 @@ namespace {
 // ---------------------------------------------------------------------------
 
 int run_headless() {
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    // Override priority so SDL_VIDEODRIVER can't make this mode open a window.
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::println(stderr, "SDL_Init failed: {}", SDL_GetError());
@@ -47,10 +48,8 @@ int run_headless() {
 } // namespace
 } // namespace stackide
 
-// clang-tidy's static analysis flags std::println itself as a possible
-// format_error throw site, even for the literal, compile-time-validated
-// format strings used below, which the standard guarantees cannot throw at
-// runtime for that reason. There's no reachable path left to catch here.
+// The handler's own println can still throw if writing to stderr fails. With
+// stderr gone there is nowhere left to report to, so terminating is acceptable.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char** argv) {
     try {
@@ -58,6 +57,12 @@ int main(int argc, char** argv) {
         if (!stackide::parse_args(argc, argv, opts)) {
             stackide::print_usage();
             return EXIT_FAILURE;
+        }
+
+        // CI sets this so a broken GPU path fails instead of passing as a skip.
+        if (const char* require_gpu = std::getenv("STACKIDE_REQUIRE_GPU");
+            require_gpu != nullptr && *require_gpu != '\0') {
+            opts.allow_skip = false;
         }
 
         switch (opts.mode) {

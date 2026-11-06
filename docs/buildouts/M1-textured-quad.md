@@ -105,8 +105,10 @@ The development display runs both. The 100 Hz budget is the binding one and is
 what the gates above are set against.
 
 **CPU frame time** is measured from the top of the loop iteration to the return
-of `SDL_SubmitGPUCommandBuffer`. It excludes the vsync wait, which is why frame
-cost is measured in immediate mode.
+of `SDL_SubmitGPUCommandBuffer`. Under vsync, the time spent waiting to acquire
+the swapchain texture is subtracted, because that is where the vsync wait
+happens. In immediate mode that wait is GPU back-pressure and stays included,
+which is why frame cost is gated there.
 
 **Input to paint** is measured from the SDL event timestamp to the return of
 `SDL_SubmitGPUCommandBuffer` for the frame that reflects it. It deliberately
