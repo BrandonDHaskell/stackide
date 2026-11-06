@@ -1,13 +1,13 @@
 # tests/CMakeLists.txt
 #
 # Smoke tests drive the stackide binary as a black box: the process exit code
-# is the assertion. No test framework is linked yet, deliberately (see notes at
-# the bottom of this file).
+# is the assertion. Unit tests use Catch2 and sit at the bottom of this file.
 #
 # Labels:
 #   smoke    every test here
 #   gpu      requires a working GPU backend (Vulkan, or lavapipe in CI)
 #   display  requires a window system (never runs on a stock CI runner)
+#   unit     Catch2 tests with no GPU or window
 #
 # Exit code 77 means "skipped" and is honored via SKIP_RETURN_CODE below.
 
@@ -166,11 +166,14 @@ set_tests_properties(${STACKIDE_SMOKE_TESTS} PROPERTIES
         SKIP_RETURN_CODE 77)
 
 # ---------------------------------------------------------------------------
-# Notes
-#
-# No Catch2 or GoogleTest yet. Add one the first time a test needs to assert on
-# something other than an exit code, which will most likely be the arg parser.
-# At that point, split src/ into a stackide_lib target plus a thin stackide
-# executable, then link the test binary against stackide_lib and register it
-# here with the same label scheme.
+# Unit tests. No GPU or window, so these also run under TSan, where uninstrumented
+# drivers make the GPU tests unusable.
 # ---------------------------------------------------------------------------
+add_executable(stackide_unit_tests
+        unit/test_constants.cpp
+        unit/test_options.cpp
+        unit/test_percentile.cpp)
+target_link_libraries(stackide_unit_tests PRIVATE
+        stackide_base stackide_profile stackide_warnings Catch2::Catch2WithMain)
+add_test(NAME unit COMMAND stackide_unit_tests)
+set_tests_properties(unit PROPERTIES LABELS "unit")

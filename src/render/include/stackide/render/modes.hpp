@@ -4,11 +4,12 @@
 // run_headless() is deliberately not declared here: it's never called
 // outside main.cpp, so it stays anonymous-namespace-local there.
 
-#include <stackide/options.hpp>
+#include <stackide/base/options.hpp>
 
-namespace stackide {
+namespace stackide
+{
 
-int run_offscreen(const Options& opts);
-int run_windowed(const Options& opts);
+    int run_offscreen(const Options& opts);
+    int run_windowed(const Options& opts);
 
 } // namespace stackide

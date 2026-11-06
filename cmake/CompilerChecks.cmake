@@ -14,7 +14,7 @@ include(CheckCXXSourceCompiles)
 # ---------------------------------------------------------------------------
 
 set(STACKIDE_MIN_GCC   16.0)
-set(STACKIDE_MIN_CLANG 21.0)
+set(STACKIDE_MIN_CLANG 23.0)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS STACKIDE_MIN_GCC)

@@ -25,3 +25,31 @@ if(STACKIDE_HEADLESS)
 endif()
 
 FetchContent_MakeAvailable(SDL3)
+
+# Neither project publishes a source archive as a release asset, so these are
+# GitHub's generated tag archives. If GitHub's bytes ever change, the hash check
+# fails at configure rather than building something unexpected.
+#
+# The Tracy profiler UI must match this client's protocol, so use its 0.14.1 build.
+FetchContent_Declare(tracy
+        URL      https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz
+        URL_HASH SHA256=bf4af567e9c7524d07f3caa745fad02fb33bd5694f11910750382d1efbb251c1
+        SYSTEM
+        EXCLUDE_FROM_ALL
+)
+
+set(TRACY_STATIC ON CACHE BOOL "" FORCE)
+set(TRACY_ENABLE ${STACKIDE_PROFILING} CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(tracy)
+
+if(STACKIDE_BUILD_TESTS)
+    FetchContent_Declare(Catch2
+            URL      https://github.com/catchorg/Catch2/archive/refs/tags/v3.16.1.tar.gz
+            URL_HASH SHA256=d16bd1b8b2364918bd472cb216394acb93bde6784890df0d91bccfb3f28d777d
+            SYSTEM
+            EXCLUDE_FROM_ALL
+    )
+
+    FetchContent_MakeAvailable(Catch2)
+endif()

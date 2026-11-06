@@ -1,0 +1,46 @@
+#pragma once
+
+#include <stackide/base/constants.hpp>
+
+#include <cstdint>
+#include <optional>
+
+namespace stackide
+{
+
+    enum class Mode : std::uint8_t
+    {
+        Windowed,
+        Offscreen,
+        Headless,
+    };
+    enum class PresentMode : std::uint8_t
+    {
+        Vsync,
+        Immediate,
+    };
+
+    struct Options
+    {
+        Mode mode = Mode::Windowed;
+        PresentMode present_mode = PresentMode::Vsync;
+        int frames = 0; // 0 means run until quit
+        std::uint64_t timeout_ms = kDefaultTimeoutMs; // 0 disables the deadline
+        bool allow_skip = false;
+        bool gpu_debug = false;
+
+        // M1 item 6: requires windowed mode with --present-mode immediate.
+        std::optional<double> assert_p99_under_ms;
+        // M1 item 7: requires windowed mode with --present-mode vsync.
+        std::optional<int> assert_max_dropped_frames;
+
+        // M1 item 8: requires windowed mode. All three or none.
+        int resize_after_frames = 0; // 0 means no programmatic resize
+        int resize_width = 0;
+        int resize_height = 0;
+    };
+
+    void print_usage();
+    bool parse_args(int argc, char** argv, Options& out);
+
+} // namespace stackide

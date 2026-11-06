@@ -48,7 +48,7 @@ done, it is asserted.
 9. **Clean build.** Zero warnings with `-Werror` on the `gcc`, `clang`,
    `gcc-release`, and `clang-release` presets.
 10. **Clean static analysis.** `clang-tidy` reports nothing under the check set
-    in `.clangd`.
+    in `.clang-tidy`.
 11. **All tests green.** `ctest --preset gcc` and `--preset clang` pass locally;
     `ctest --preset ci-gcc` and `--preset ci-clang` pass in the toolchain
     container.
