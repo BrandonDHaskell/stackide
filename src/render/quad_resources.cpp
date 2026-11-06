@@ -1,16 +1,14 @@
 #include <stackide/render/quad_resources.hpp>
 
 #include <stackide/base/log.hpp>
-#include <stackide/base/scope_exit.hpp>
 #include <stackide/render/render_constants.hpp>
+#include <stackide/render/upload_ring.hpp>
 #include <stackide/shaders/quad_frag_spv.hpp>
 #include <stackide/shaders/quad_vert_spv.hpp>
 
-#include <SDL3/SDL.h>
-
 #include <array>
 #include <cstddef>
-#include <cstring>
+#include <span>
 
 namespace stackide
 {
@@ -24,8 +22,7 @@ namespace stackide
         };
 
         // Unit quad in clip space. Aspect-ratio scaling is applied via the vertex
-        // shader's uniform (see kIdentityScale below; real letterboxing lands with
-        // resize handling), not baked into these positions.
+        // shader's uniform, not baked into these positions.
         inline constexpr std::array<Vertex, 4> kQuadVertices = {
             {
                 {.x = -1.0F, .y = -1.0F, .u = 0.0F, .v = 1.0F},
@@ -35,7 +32,7 @@ namespace stackide
             },
         };
 
-        inline constexpr std::array<Uint16, 6> kQuadIndices = {0, 1, 2, 0, 2, 3};
+        inline constexpr std::array<Uint16, kQuadIndexCount> kQuadIndices = {0, 1, 2, 0, 2, 3};
 
     } // namespace
 
@@ -65,31 +62,7 @@ namespace stackide
         return pixels;
     }
 
-    void destroy_quad_resources(SDL_GPUDevice* gpu, const QuadResources& res)
-    {
-        if (res.pipeline != nullptr)
-        {
-            SDL_ReleaseGPUGraphicsPipeline(gpu, res.pipeline);
-        }
-        if (res.sampler != nullptr)
-        {
-            SDL_ReleaseGPUSampler(gpu, res.sampler);
-        }
-        if (res.texture != nullptr)
-        {
-            SDL_ReleaseGPUTexture(gpu, res.texture);
-        }
-        if (res.vertex_buffer != nullptr)
-        {
-            SDL_ReleaseGPUBuffer(gpu, res.vertex_buffer);
-        }
-        if (res.index_buffer != nullptr)
-        {
-            SDL_ReleaseGPUBuffer(gpu, res.index_buffer);
-        }
-    }
-
-    std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu, SDL_GPUTextureFormat color_format)
+    std::optional<QuadResources> create_quad_resources(const render::Device& device, SDL_GPUTextureFormat color_format)
     {
         SDL_GPUShaderCreateInfo vert_info{};
         vert_info.code = kQuadVertSpv.data();
@@ -98,13 +71,7 @@ namespace stackide
         vert_info.format = SDL_GPU_SHADERFORMAT_SPIRV;
         vert_info.stage = SDL_GPU_SHADERSTAGE_VERTEX;
         vert_info.num_uniform_buffers = 1;
-        SDL_GPUShader* vert_shader = SDL_CreateGPUShader(gpu, &vert_info);
-        if (vert_shader == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUShader (vertex) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
-        ScopeExit destroy_vert{[gpu, vert_shader] { SDL_ReleaseGPUShader(gpu, vert_shader); }};
+        const render::Shader vert_shader = device.create_shader(vert_info, "vertex shader");
 
         SDL_GPUShaderCreateInfo frag_info{};
         frag_info.code = kQuadFragSpv.data();
@@ -113,38 +80,24 @@ namespace stackide
         frag_info.format = SDL_GPU_SHADERFORMAT_SPIRV;
         frag_info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
         frag_info.num_samplers = 1;
-        SDL_GPUShader* frag_shader = SDL_CreateGPUShader(gpu, &frag_info);
-        if (frag_shader == nullptr)
+        const render::Shader frag_shader = device.create_shader(frag_info, "fragment shader");
+        if (!vert_shader || !frag_shader)
         {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUShader (fragment) failed: {}", SDL_GetError());
             return std::nullopt;
         }
-        ScopeExit destroy_frag{[gpu, frag_shader] { SDL_ReleaseGPUShader(gpu, frag_shader); }};
 
-        constexpr Uint32 kVertexBytes = sizeof(kQuadVertices);
-        constexpr Uint32 kIndexBytes = sizeof(kQuadIndices);
+        const auto vertex_bytes = std::as_bytes(std::span{kQuadVertices});
+        const auto index_bytes = std::as_bytes(std::span{kQuadIndices});
 
         SDL_GPUBufferCreateInfo vb_info{};
         vb_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-        vb_info.size = kVertexBytes;
-        SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(gpu, &vb_info);
-        if (vertex_buffer == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUBuffer (vertex) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
-        ScopeExit destroy_vb{[gpu, vertex_buffer] { SDL_ReleaseGPUBuffer(gpu, vertex_buffer); }};
+        vb_info.size = static_cast<Uint32>(vertex_bytes.size());
+        render::Buffer vertex_buffer = device.create_buffer(vb_info, "vertex buffer");
 
         SDL_GPUBufferCreateInfo ib_info{};
         ib_info.usage = SDL_GPU_BUFFERUSAGE_INDEX;
-        ib_info.size = kIndexBytes;
-        SDL_GPUBuffer* index_buffer = SDL_CreateGPUBuffer(gpu, &ib_info);
-        if (index_buffer == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUBuffer (index) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
-        ScopeExit destroy_ib{[gpu, index_buffer] { SDL_ReleaseGPUBuffer(gpu, index_buffer); }};
+        ib_info.size = static_cast<Uint32>(index_bytes.size());
+        render::Buffer index_buffer = device.create_buffer(ib_info, "index buffer");
 
         // The checkerboard is always R8G8B8A8_UNORM_SRGB regardless of the
         // render target's format: sampling doesn't require the two to match,
@@ -152,7 +105,7 @@ namespace stackide
         // render target (see color_format below).
         const std::vector<std::uint8_t> checker =
             make_checkerboard(kCheckerSize, kCheckerCell, kCheckerLight, kCheckerDark);
-        const auto checker_bytes = static_cast<Uint32>(checker.size());
+        const auto checker_bytes = std::as_bytes(std::span{checker});
 
         SDL_GPUTextureCreateInfo tex_info{};
         tex_info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -163,80 +116,7 @@ namespace stackide
         tex_info.layer_count_or_depth = 1;
         tex_info.num_levels = 1;
         tex_info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-        SDL_GPUTexture* texture = SDL_CreateGPUTexture(gpu, &tex_info);
-        if (texture == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUTexture (checkerboard) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
-        ScopeExit destroy_tex{[gpu, texture] { SDL_ReleaseGPUTexture(gpu, texture); }};
-
-        const Uint32 upload_size = kVertexBytes + kIndexBytes + checker_bytes;
-        SDL_GPUTransferBufferCreateInfo tb_info{};
-        tb_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        tb_info.size = upload_size;
-        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(gpu, &tb_info);
-        if (transfer == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUTransferBuffer (upload) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
-        ScopeExit destroy_transfer{[gpu, transfer] { SDL_ReleaseGPUTransferBuffer(gpu, transfer); }};
-
-        auto* mapped = static_cast<std::uint8_t*>(SDL_MapGPUTransferBuffer(gpu, transfer, false));
-        if (mapped == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_MapGPUTransferBuffer (upload) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
-        std::memcpy(mapped, kQuadVertices.data(), kVertexBytes);
-        std::memcpy(mapped + kVertexBytes, kQuadIndices.data(), kIndexBytes);
-        std::memcpy(mapped + kVertexBytes + kIndexBytes, checker.data(), checker_bytes);
-        SDL_UnmapGPUTransferBuffer(gpu, transfer);
-
-        SDL_GPUCommandBuffer* upload_cmd = SDL_AcquireGPUCommandBuffer(gpu);
-        if (upload_cmd == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_AcquireGPUCommandBuffer (upload) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
-
-        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(upload_cmd);
-        if (copy == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_BeginGPUCopyPass (upload) failed: {}", SDL_GetError());
-            SDL_CancelGPUCommandBuffer(upload_cmd);
-            return std::nullopt;
-        }
-
-        const SDL_GPUTransferBufferLocation vb_src{.transfer_buffer = transfer, .offset = 0};
-        const SDL_GPUBufferRegion vb_dst{.buffer = vertex_buffer, .offset = 0, .size = kVertexBytes};
-        SDL_UploadToGPUBuffer(copy, &vb_src, &vb_dst, false);
-
-        const SDL_GPUTransferBufferLocation ib_src{.transfer_buffer = transfer, .offset = kVertexBytes};
-        const SDL_GPUBufferRegion ib_dst{.buffer = index_buffer, .offset = 0, .size = kIndexBytes};
-        SDL_UploadToGPUBuffer(copy, &ib_src, &ib_dst, false);
-
-        SDL_GPUTextureTransferInfo tex_src{};
-        tex_src.transfer_buffer = transfer;
-        tex_src.offset = kVertexBytes + kIndexBytes;
-        tex_src.pixels_per_row = static_cast<Uint32>(kCheckerSize);
-        tex_src.rows_per_layer = static_cast<Uint32>(kCheckerSize);
-
-        SDL_GPUTextureRegion tex_dst{};
-        tex_dst.texture = texture;
-        tex_dst.w = static_cast<Uint32>(kCheckerSize);
-        tex_dst.h = static_cast<Uint32>(kCheckerSize);
-        tex_dst.d = 1;
-        SDL_UploadToGPUTexture(copy, &tex_src, &tex_dst, false);
-
-        SDL_EndGPUCopyPass(copy);
-
-        if (!SDL_SubmitGPUCommandBuffer(upload_cmd))
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_SubmitGPUCommandBuffer (upload) failed: {}", SDL_GetError());
-            return std::nullopt;
-        }
+        render::Texture texture = device.create_texture(tex_info, "checkerboard texture");
 
         SDL_GPUSamplerCreateInfo sampler_info{};
         sampler_info.min_filter = SDL_GPU_FILTER_NEAREST;
@@ -245,16 +125,60 @@ namespace stackide
         sampler_info.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
         sampler_info.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
         sampler_info.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-        // Nearest filtering is deliberate: the offscreen pixel assertions (added
-        // alongside this) check exact bytes on each side of a checker boundary,
-        // which linear filtering would blend across.
-        SDL_GPUSampler* sampler = SDL_CreateGPUSampler(gpu, &sampler_info);
-        if (sampler == nullptr)
+        // Nearest filtering is deliberate: the offscreen pixel assertions check exact
+        // bytes on each side of a checker boundary, which linear filtering would blend.
+        render::Sampler sampler = device.create_sampler(sampler_info, "sampler");
+        if (!vertex_buffer || !index_buffer || !texture || !sampler)
         {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUSampler failed: {}", SDL_GetError());
             return std::nullopt;
         }
-        ScopeExit destroy_sampler{[gpu, sampler] { SDL_ReleaseGPUSampler(gpu, sampler); }};
+
+        const auto upload_size = static_cast<Uint32>(vertex_bytes.size() + index_bytes.size() + checker_bytes.size());
+        std::optional<render::UploadRing> ring = render::UploadRing::create(device, upload_size);
+        if (!ring || !ring->begin())
+        {
+            return std::nullopt;
+        }
+        const auto vertex_source = ring->write(vertex_bytes);
+        const auto index_source = ring->write(index_bytes);
+        const auto checker_source = ring->write(checker_bytes);
+        ring->end();
+        if (!vertex_source || !index_source || !checker_source)
+        {
+            return std::nullopt;
+        }
+
+        std::optional<render::CommandBuffer> commands = render::CommandBuffer::acquire(device);
+        if (!commands)
+        {
+            return std::nullopt;
+        }
+        {
+            std::optional<render::CopyPass> copy = commands->begin_copy_pass();
+            if (!copy)
+            {
+                return std::nullopt;
+            }
+            copy->upload(*vertex_source, vertex_buffer, static_cast<Uint32>(vertex_bytes.size()));
+            copy->upload(*index_source, index_buffer, static_cast<Uint32>(index_bytes.size()));
+
+            SDL_GPUTextureTransferInfo tex_source{};
+            tex_source.transfer_buffer = checker_source->transfer_buffer;
+            tex_source.offset = checker_source->offset;
+            tex_source.pixels_per_row = static_cast<Uint32>(kCheckerSize);
+            tex_source.rows_per_layer = static_cast<Uint32>(kCheckerSize);
+
+            SDL_GPUTextureRegion tex_destination{};
+            tex_destination.texture = texture.get();
+            tex_destination.w = static_cast<Uint32>(kCheckerSize);
+            tex_destination.h = static_cast<Uint32>(kCheckerSize);
+            tex_destination.d = 1;
+            copy->upload(tex_source, tex_destination);
+        }
+        if (!commands->submit())
+        {
+            return std::nullopt;
+        }
 
         const SDL_GPUVertexBufferDescription vb_desc{
             .slot = 0,
@@ -284,8 +208,8 @@ namespace stackide
         color_target.blend_state.enable_blend = false;
 
         SDL_GPUGraphicsPipelineCreateInfo pipeline_info{};
-        pipeline_info.vertex_shader = vert_shader;
-        pipeline_info.fragment_shader = frag_shader;
+        pipeline_info.vertex_shader = vert_shader.get();
+        pipeline_info.fragment_shader = frag_shader.get();
         pipeline_info.vertex_input_state.vertex_buffer_descriptions = &vb_desc;
         pipeline_info.vertex_input_state.num_vertex_buffers = 1;
         pipeline_info.vertex_input_state.vertex_attributes = attrs.data();
@@ -299,25 +223,30 @@ namespace stackide
         pipeline_info.target_info.num_color_targets = 1;
         pipeline_info.target_info.has_depth_stencil_target = false;
 
-        SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &pipeline_info);
-        if (pipeline == nullptr)
+        render::Pipeline pipeline = device.create_pipeline(pipeline_info, "graphics pipeline");
+        if (!pipeline)
         {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUGraphicsPipeline failed: {}", SDL_GetError());
             return std::nullopt;
         }
 
-        destroy_sampler.release();
-        destroy_tex.release();
-        destroy_ib.release();
-        destroy_vb.release();
-
         return QuadResources{
-            .pipeline = pipeline,
-            .vertex_buffer = vertex_buffer,
-            .index_buffer = index_buffer,
-            .texture = texture,
-            .sampler = sampler,
+            .pipeline = std::move(pipeline),
+            .vertex_buffer = std::move(vertex_buffer),
+            .index_buffer = std::move(index_buffer),
+            .texture = std::move(texture),
+            .sampler = std::move(sampler),
         };
+    }
+
+    void draw_quad(render::CommandBuffer& commands, render::RenderPass& pass, const QuadResources& quad,
+                   std::array<float, 2> scale)
+    {
+        pass.bind_pipeline(quad.pipeline);
+        pass.bind_vertex_buffer(quad.vertex_buffer);
+        pass.bind_index_buffer_16(quad.index_buffer);
+        pass.bind_fragment_texture(quad.texture, quad.sampler);
+        commands.push_vertex_uniform(scale.data(), sizeof(scale));
+        pass.draw_indexed(kQuadIndexCount);
     }
 
 } // namespace stackide

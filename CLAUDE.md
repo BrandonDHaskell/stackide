@@ -32,7 +32,7 @@ Lint: `cmake --build --preset clang --target format-check tidy`.
 Verify in the container before pushing. This builds in a copy inside the
 container, because a CMake cache can't be shared between host and container paths:
 
-    IMAGE=$(sed -n 's/.*container: //p' .github/workflows/ci.yml)
+    IMAGE=$(sed -n 's/.*\(container\|image\): \(ghcr.*\)/\2/p' .github/workflows/ci.yml | head -1)
     docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/w:ro "$IMAGE" bash -c \
       'mkdir /tmp/w && tar -C /w --exclude=./build --exclude=./.git -cf - . | tar -xf - -C /tmp/w && cd /tmp/w && cmake --preset gcc && cmake --build --preset gcc && ctest --preset ci-gcc'
 

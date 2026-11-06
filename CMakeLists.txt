@@ -10,6 +10,10 @@ set(STACKIDE_SANITIZE "" CACHE STRING "Value for -fsanitize=, empty to disable")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# The project uses headers, not modules. Scanning only adds build steps, and module map
+# flags in compile_commands.json that clang-tidy can't read before they're generated.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # 2. Toolchain and dependencies
 include(CompilerChecks)
 
@@ -28,6 +32,7 @@ include(Lint)
 add_library(stackide_base STATIC
         src/base/log.cpp
         src/base/options.cpp
+        src/base/include/stackide/base/bump_cursor.hpp
         src/base/include/stackide/base/constants.hpp
         src/base/include/stackide/base/log.hpp
         src/base/include/stackide/base/options.hpp
@@ -66,26 +71,44 @@ add_library(stackide_core STATIC
 target_include_directories(stackide_core PUBLIC src/core/include)
 target_link_libraries(stackide_core PRIVATE stackide_warnings)
 
+# The only module besides render that may use SDL. Its public headers don't include it.
+add_library(stackide_platform STATIC
+        src/platform/event.cpp
+        src/platform/video.cpp
+        src/platform/window.cpp
+        src/platform/include/stackide/platform/event.hpp
+        src/platform/include/stackide/platform/video.hpp
+        src/platform/include/stackide/platform/window.hpp
+)
+target_include_directories(stackide_platform PUBLIC src/platform/include)
+target_link_libraries(stackide_platform
+        PUBLIC stackide_base
+        PRIVATE SDL3::SDL3 stackide_warnings)
+
 add_library(stackide_render STATIC
+        src/render/gpu.cpp
         src/render/quad_resources.cpp
         src/render/run_offscreen.cpp
         src/render/run_windowed.cpp
+        src/render/upload_ring.cpp
+        src/render/include/stackide/render/gpu.hpp
         src/render/include/stackide/render/modes.hpp
         src/render/include/stackide/render/quad_resources.hpp
         src/render/include/stackide/render/render_constants.hpp
+        src/render/include/stackide/render/upload_ring.hpp
 )
 target_include_directories(stackide_render
         PUBLIC src/render/include
         PRIVATE "${STACKIDE_SHADER_INCLUDE_DIR}")
 target_link_libraries(stackide_render
-        PUBLIC stackide_base SDL3::SDL3
-        PRIVATE stackide_profile stackide_warnings)
+        PUBLIC stackide_base stackide_platform
+        PRIVATE SDL3::SDL3 stackide_profile stackide_warnings)
 
-stackide_add_shader(stackide_render shaders/quad.vert.glsl vert kQuadVertSpv)
-stackide_add_shader(stackide_render shaders/quad.frag.glsl frag kQuadFragSpv)
+stackide_add_shader(stackide_render shaders/quad.vert.hlsl vert kQuadVertSpv)
+stackide_add_shader(stackide_render shaders/quad.frag.hlsl frag kQuadFragSpv)
 
 add_executable(stackide src/app/main.cpp)
-target_link_libraries(stackide PRIVATE stackide_render stackide_warnings)
+target_link_libraries(stackide PRIVATE stackide_platform stackide_render stackide_warnings)
 
 include(Boundaries)
 foreach(sdl_free_module stackide_base stackide_profile stackide_core)

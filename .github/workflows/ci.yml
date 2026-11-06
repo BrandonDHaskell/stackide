@@ -57,7 +57,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: brew install glslang ninja
-      - run: echo "LLVM_ROOT=$HOME/llvm-$LLVM_VERSION" >> "$GITHUB_ENV"
+      - run: |
+          echo "LLVM_ROOT=$HOME/llvm-$LLVM_VERSION" >> "$GITHUB_ENV"
+          # LLVM's own clang doesn't find Apple's SDK by itself.
+          echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
       - id: llvm-cache
         uses: actions/cache@v4
         with:

@@ -1,9 +1,9 @@
 # cmake/Shaders.cmake
 #
-# Compiles GLSL sources under shaders/ to SPIR-V via glslangValidator, then
+# Compiles HLSL sources under shaders/ to SPIR-V via glslangValidator, then
 # generates a C++ header embedding each shader's bytes as a static array.
-# No .glsl or .spv file is installed or read at runtime (see
-# docs/buildouts/M1-textured-quad.md decision 1 and 4).
+# No .hlsl or .spv file is installed or read at runtime. See
+# docs/adr/0002-hlsl-via-glslang.md for how shaders must declare their resources.
 
 include_guard(GLOBAL)
 
@@ -17,14 +17,14 @@ endif()
 
 set(STACKIDE_SHADER_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
 
-# stackide_add_shader(<target> <source>.glsl <vert|frag> <var-name>)
+# stackide_add_shader(<target> <source>.hlsl <vert|frag> <var-name>)
 #
 # Compiles <source> to SPIR-V and generates a header at
 # ${STACKIDE_SHADER_INCLUDE_DIR}/stackide/shaders/<basename>_spv.hpp exposing
 # the bytes as `inline constexpr std::array<unsigned char, N> <var-name>`.
 function(stackide_add_shader target source stage var_name)
     get_filename_component(file_name "${source}" NAME)
-    string(REGEX REPLACE "\\.glsl$" "" stem "${file_name}")
+    string(REGEX REPLACE "\\.hlsl$" "" stem "${file_name}")
     string(REPLACE "." "_" base_name "${stem}")
     set(spv_path "${CMAKE_CURRENT_BINARY_DIR}/shaders/${base_name}.spv")
     set(header_path "${STACKIDE_SHADER_INCLUDE_DIR}/stackide/shaders/${base_name}_spv.hpp")
@@ -32,7 +32,7 @@ function(stackide_add_shader target source stage var_name)
 
     add_custom_command(
             OUTPUT "${spv_path}"
-            COMMAND "${GLSLANG_VALIDATOR}" -V -S "${stage}" -o "${spv_path}" "${source_path}"
+            COMMAND "${GLSLANG_VALIDATOR}" -V -D -e main -S "${stage}" -o "${spv_path}" "${source_path}"
             DEPENDS "${source_path}"
             COMMENT "Compiling ${source} to SPIR-V"
             VERBATIM

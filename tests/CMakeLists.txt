@@ -38,6 +38,15 @@ set_tests_properties(smoke.offscreen PROPERTIES
         RESOURCE_LOCK gpu)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.offscreen)
 
+# Skips where validation layers aren't installed, unless STACKIDE_REQUIRE_GPU makes that
+# a failure, so that a passing run in CI really did validate.
+add_test(NAME smoke.offscreen_validated
+        COMMAND stackide --offscreen --gpu-debug --require-validation --allow-skip)
+set_tests_properties(smoke.offscreen_validated PROPERTIES
+        LABELS "smoke;gpu"
+        RESOURCE_LOCK gpu)
+list(APPEND STACKIDE_SMOKE_TESTS smoke.offscreen_validated)
+
 # STACKIDE_REQUIRE_GPU must turn a skip into a failure. Checks for exit 1
 # exactly, because WILL_FAIL would also accept the skip code this guards against.
 add_test(NAME smoke.require_gpu_rejects_skip
@@ -57,6 +66,15 @@ set_tests_properties(smoke.windowed PROPERTIES
         RESOURCE_LOCK gpu)
 list(APPEND STACKIDE_SMOKE_TESTS smoke.windowed)
 
+foreach(driver wayland x11)
+    add_test(NAME smoke.windowed_${driver}
+            COMMAND stackide --frames 3 --timeout-ms 10000 --video-driver ${driver} --allow-skip)
+    set_tests_properties(smoke.windowed_${driver} PROPERTIES
+            LABELS "smoke;gpu;display"
+            RESOURCE_LOCK gpu)
+    list(APPEND STACKIDE_SMOKE_TESTS smoke.windowed_${driver})
+endforeach()
+
 # M1 item 8: a programmatic resize mid-run must not crash. Aspect-ratio
 # correctness itself is a manual/visual check, not asserted here.
 add_test(NAME smoke.resize
@@ -72,8 +90,10 @@ list(APPEND STACKIDE_SMOKE_TESTS smoke.resize)
 # as Tier 3 -- both the frame-cost floor and the live refresh rate are
 # properties of real hardware, not something CI's headless container has.
 # ---------------------------------------------------------------------------
+# Pinned to X11: a Wayland compositor throttles immediate mode to the refresh rate, so
+# there this would measure the compositor rather than the cost of a frame.
 add_test(NAME smoke.frame_cost_gate
-        COMMAND stackide --present-mode immediate --frames 1000
+        COMMAND stackide --present-mode immediate --frames 1000 --video-driver x11
                 --assert-p99-under-ms 2.0 --allow-skip)
 set_tests_properties(smoke.frame_cost_gate PROPERTIES
         LABELS "smoke;gpu;display"
@@ -179,6 +199,7 @@ set_tests_properties(smoke.log_file_written PROPERTIES LABELS "smoke")
 # drivers make the GPU tests unusable.
 # ---------------------------------------------------------------------------
 add_executable(stackide_unit_tests
+        unit/test_bump_cursor.cpp
         unit/test_constants.cpp
         unit/test_log.cpp
         unit/test_log_compile_level.cpp
@@ -205,6 +226,18 @@ stackide_add_boundary_test(clean)
 foreach(case direct transitive link_only alias)
     stackide_add_boundary_test(${case} PASS_REGULAR_EXPRESSION "core must not link")
 endforeach()
+
+# ---------------------------------------------------------------------------
+# Tests that need a real GPU device, on lavapipe in CI.
+# ---------------------------------------------------------------------------
+add_executable(stackide_gpu_tests gpu/test_upload_ring.cpp)
+target_link_libraries(stackide_gpu_tests PRIVATE
+        stackide_render stackide_platform SDL3::SDL3 stackide_warnings Catch2::Catch2WithMain)
+add_test(NAME gpu.upload_ring COMMAND stackide_gpu_tests)
+set_tests_properties(gpu.upload_ring PROPERTIES
+        LABELS "gpu"
+        RESOURCE_LOCK gpu
+        SKIP_REGULAR_EXPRESSION "skipped: no GPU device")
 
 # ---------------------------------------------------------------------------
 # Log call cost (#152). The gate only means something in an optimized, uninstrumented

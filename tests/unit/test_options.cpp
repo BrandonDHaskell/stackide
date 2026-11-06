@@ -97,3 +97,27 @@ TEST_CASE("resize flags are all or nothing and windowed only")
     CHECK_FALSE(
         parse({"--offscreen", "--resize-after-frames", "1", "--resize-width", "640", "--resize-height", "480"}));
 }
+
+TEST_CASE("the video driver is windowed only")
+{
+    const auto opts = parse({"--video-driver", "x11"});
+    REQUIRE(opts);
+    CHECK(opts->video_driver == stackide::VideoDriver::X11);
+
+    CHECK_FALSE(parse({"--video-driver"}));
+    CHECK_FALSE(parse({"--video-driver", "mir"}));
+    CHECK_FALSE(parse({"--offscreen", "--video-driver", "x11"}));
+}
+
+TEST_CASE("requiring validation needs a debug device")
+{
+    CHECK(parse({"--gpu-debug", "--require-validation"}));
+    CHECK_FALSE(parse({"--require-validation"}));
+}
+
+TEST_CASE("mailbox is a present mode")
+{
+    const auto opts = parse({"--present-mode", "mailbox"});
+    REQUIRE(opts);
+    CHECK(opts->present_mode == stackide::PresentMode::Mailbox);
+}

@@ -76,6 +76,10 @@ namespace stackide
             {
                 out.present_mode = PresentMode::Vsync;
             }
+            else if (value == "mailbox")
+            {
+                out.present_mode = PresentMode::Mailbox;
+            }
             else if (value == "immediate")
             {
                 out.present_mode = PresentMode::Immediate;
@@ -83,6 +87,45 @@ namespace stackide
             else
             {
                 std::println(stderr, "invalid value for --present-mode: {}", value);
+                return false;
+            }
+            return true;
+        }
+
+        bool parse_video_driver(int argc, char** argv, int& i, Options& out)
+        {
+            if (i + 1 >= argc)
+            {
+                std::println(stderr, "missing value for --video-driver");
+                return false;
+            }
+            const std::string_view value{argv[++i]};
+            if (value == "wayland")
+            {
+                out.video_driver = VideoDriver::Wayland;
+            }
+            else if (value == "x11")
+            {
+                out.video_driver = VideoDriver::X11;
+            }
+            else
+            {
+                std::println(stderr, "invalid value for --video-driver: {}", value);
+                return false;
+            }
+            return true;
+        }
+
+        bool validate_gpu_flags(const Options& out)
+        {
+            if (out.video_driver != VideoDriver::Native && out.mode != Mode::Windowed)
+            {
+                std::println(stderr, "--video-driver requires windowed mode");
+                return false;
+            }
+            if (out.require_validation && !out.gpu_debug)
+            {
+                std::println(stderr, "--require-validation requires --gpu-debug");
                 return false;
             }
             return true;
@@ -128,10 +171,10 @@ namespace stackide
     {
         std::println(stderr,
                      "usage: stackide [--frames N] [--offscreen] [--headless] "
-                     "[--timeout-ms N] [--present-mode vsync|immediate] "
+                     "[--timeout-ms N] [--present-mode vsync|mailbox|immediate] [--video-driver wayland|x11] "
                      "[--assert-p99-under-ms MS] [--assert-max-dropped-frames N] "
                      "[--resize-after-frames N --resize-width W --resize-height H] "
-                     "[--allow-skip] [--gpu-debug]");
+                     "[--allow-skip] [--gpu-debug [--require-validation]]");
     }
 
     bool parse_args(int argc, char** argv, Options& out)
@@ -160,6 +203,14 @@ namespace stackide
             else if (arg == "--gpu-debug")
             {
                 out.gpu_debug = true;
+            }
+            else if (arg == "--require-validation")
+            {
+                out.require_validation = true;
+            }
+            else if (arg == "--video-driver")
+            {
+                ok = parse_video_driver(argc, argv, i, out);
             }
             else if (arg == "--present-mode")
             {
@@ -211,7 +262,7 @@ namespace stackide
             }
         }
 
-        return validate_resize_flags(out) && validate_gate_flags(out);
+        return validate_resize_flags(out) && validate_gate_flags(out) && validate_gpu_flags(out);
     }
 
 } // namespace stackide

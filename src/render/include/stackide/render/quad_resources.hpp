@@ -1,6 +1,6 @@
 #pragma once
 
-#include <SDL3/SDL.h>
+#include <stackide/render/gpu.hpp>
 
 #include <array>
 #include <cstdint>
@@ -12,8 +12,10 @@ namespace stackide
 
     inline constexpr int kCheckerSize = 64;
     inline constexpr int kCheckerCell = 8;
-    inline constexpr std::array<std::uint8_t, 4> kCheckerLight = {0xE0, 0xE0, 0xE0, 0xFF};
-    inline constexpr std::array<std::uint8_t, 4> kCheckerDark = {0x20, 0x20, 0x20, 0xFF};
+    // Each channel differs, so that the offscreen pixel checks catch swapped channels.
+    inline constexpr std::array<std::uint8_t, 4> kCheckerLight = {0xE0, 0xC0, 0xA0, 0xFF};
+    inline constexpr std::array<std::uint8_t, 4> kCheckerDark = {0x20, 0x30, 0x40, 0xFF};
+    inline constexpr Uint32 kQuadIndexCount = 6;
 
     // Generated procedurally, not loaded from a file: no image-decoding
     // dependency needed for a two-color grid.
@@ -22,20 +24,21 @@ namespace stackide
 
     struct QuadResources
     {
-        SDL_GPUGraphicsPipeline* pipeline = nullptr;
-        SDL_GPUBuffer* vertex_buffer = nullptr;
-        SDL_GPUBuffer* index_buffer = nullptr;
-        SDL_GPUTexture* texture = nullptr;
-        SDL_GPUSampler* sampler = nullptr;
+        render::Pipeline pipeline;
+        render::Buffer vertex_buffer;
+        render::Buffer index_buffer;
+        render::Texture texture;
+        render::Sampler sampler;
     };
 
-    void destroy_quad_resources(SDL_GPUDevice* gpu, const QuadResources& res);
+    // Creates the pipeline targeting color_format (the caller's actual render target's
+    // format, since the swapchain's and the offscreen texture's can differ) and uploads
+    // the quad and its checkerboard texture. Empty on failure, having logged why.
+    std::optional<QuadResources> create_quad_resources(const render::Device& device, SDL_GPUTextureFormat color_format);
 
-    // Creates the pipeline targeting color_format (the caller's actual render
-    // target format -- the swapchain's or the offscreen texture's, they can
-    // differ) plus the vertex/index buffers and checkerboard texture, uploading
-    // all three through one transfer buffer. Returns std::nullopt, having
-    // cleaned up anything already created, on any failure.
-    std::optional<QuadResources> create_quad_resources(SDL_GPUDevice* gpu, SDL_GPUTextureFormat color_format);
+    // Binds everything and draws. scale shrinks the quad along each axis, which is how a
+    // window keeps it square.
+    void draw_quad(render::CommandBuffer& commands, render::RenderPass& pass, const QuadResources& quad,
+                   std::array<float, 2> scale);
 
 } // namespace stackide

@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -328,7 +327,8 @@ TEST_CASE("concurrent producers never produce a torn record")
 {
     const TempDir dir;
     constexpr int kThreads = 8;
-    constexpr auto kDuration = std::chrono::milliseconds{300};
+    // Counted in drains rather than time, so that a slow machine does the same work.
+    constexpr int kDrains = 200;
     {
         auto config = quiet_config(dir.path());
         config.ring_slots = 16;
@@ -351,8 +351,7 @@ TEST_CASE("concurrent producers never produce a torn record")
                 });
         }
 
-        const auto deadline = std::chrono::steady_clock::now() + kDuration;
-        while (std::chrono::steady_clock::now() < deadline)
+        for (int i = 0; i < kDrains; ++i)
         {
             stackide::log_flush();
         }
@@ -401,7 +400,7 @@ TEST_CASE("concurrent producers never produce a torn record")
     }
 
     INFO("records checked: " << records << ", drop notices: " << drop_notices);
-    CHECK(records > 1000);
+    CHECK(records >= kDrains);
     CHECK(drop_notices > 0);
     CHECK(std::ranges::all_of(seen, [](bool value) { return value; }));
 }

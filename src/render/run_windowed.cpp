@@ -2,8 +2,11 @@
 
 #include <stackide/base/constants.hpp>
 #include <stackide/base/log.hpp>
-#include <stackide/base/scope_exit.hpp>
+#include <stackide/platform/event.hpp>
+#include <stackide/platform/video.hpp>
+#include <stackide/platform/window.hpp>
 #include <stackide/profile/percentile.hpp>
+#include <stackide/render/gpu.hpp>
 #include <stackide/render/quad_resources.hpp>
 #include <stackide/render/render_constants.hpp>
 
@@ -33,44 +36,48 @@ namespace stackide
         // Only used when --frames is unbounded; a bounded run reserves exactly that
         // many slots instead.
         constexpr std::size_t kDefaultFrameCapacityReserve = 4096;
-
-        constexpr Uint32 kQuadIndexCount = 6;
         constexpr Uint32 kOccludedFrameDelayMs = 16;
 
         // Shrinks whichever NDC axis is longer so the (square) checkerboard quad
         // doesn't stretch to fill a non-square window.
-        void compute_letterbox_scale(SDL_Window* window, std::array<float, 2>& scale)
+        std::array<float, 2> letterbox_scale(platform::PixelSize size)
         {
-            int w = 0;
-            int h = 0;
-            SDL_GetWindowSizeInPixels(window, &w, &h);
-            if (w <= 0 || h <= 0)
+            if (size.width <= 0 || size.height <= 0)
             {
-                scale = {1.0F, 1.0F};
-                return;
+                return {1.0F, 1.0F};
             }
-            const double aspect = static_cast<double>(w) / static_cast<double>(h);
+            const double aspect = static_cast<double>(size.width) / static_cast<double>(size.height);
             if (aspect >= 1.0)
             {
-                scale = {static_cast<float>(1.0 / aspect), 1.0F};
+                return {static_cast<float>(1.0 / aspect), 1.0F};
             }
-            else
-            {
-                scale = {1.0F, static_cast<float>(aspect)};
-            }
+            return {1.0F, static_cast<float>(aspect)};
         }
 
-        // True if a quit/escape event was seen in the pending event queue. Drains
-        // the whole queue either way.
-        bool poll_quit_requested()
+        // Handles everything pending, returning whether a quit was among it.
+        bool process_events(const platform::Window& window)
         {
             bool quit = false;
-            SDL_Event event;
-            while (SDL_PollEvent(&event))
+            platform::Event event;
+            while (platform::poll_event(event))
             {
-                if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE))
+                switch (event.type)
                 {
+                case platform::EventType::Quit:
                     quit = true;
+                    break;
+                case platform::EventType::WindowResized:
+                    STACKIDE_LOG_DEBUG(LogCategory::Platform, "window resized to {}x{} pixels", event.size.width,
+                                       event.size.height);
+                    break;
+                case platform::EventType::ScaleChanged:
+                    STACKIDE_LOG_INFO(LogCategory::Platform, "display scale changed to {:.2f}",
+                                      static_cast<double>(window.display_scale()));
+                    break;
+                case platform::EventType::DisplayChanged:
+                    STACKIDE_LOG_INFO(LogCategory::Platform, "display changed, refresh rate {:.2f} Hz",
+                                      static_cast<double>(window.refresh_hz()));
+                    break;
                 }
             }
             return quit;
@@ -91,72 +98,40 @@ namespace stackide
         };
 
         // Renders and submits one frame. Returns nullopt on a real failure.
-        std::optional<RenderedFrame> render_frame(SDL_GPUDevice* gpu, SDL_Window* window, const QuadResources& quad)
+        std::optional<RenderedFrame> render_frame(const render::Device& device, const render::Swapchain& swapchain,
+                                                  const platform::Window& window, const QuadResources& quad)
         {
-            SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(gpu);
-            if (cmd == nullptr)
+            std::optional<render::CommandBuffer> commands = render::CommandBuffer::acquire(device);
+            if (!commands)
             {
-                STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
                 return std::nullopt;
             }
 
-            SDL_GPUTexture* swapchain = nullptr;
             const auto wait_start = Clock::now();
-            if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd, window, &swapchain, nullptr, nullptr))
+            const std::optional<SDL_GPUTexture*> target = commands->wait_for_swapchain_texture(swapchain);
+            if (!target)
             {
-                STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_WaitAndAcquireGPUSwapchainTexture failed: {}",
-                                   SDL_GetError());
-                // Nothing was acquired, so cancel rather than submit.
-                SDL_CancelGPUCommandBuffer(cmd);
                 return std::nullopt;
             }
             const double swapchain_wait_ms = elapsed_ms(wait_start, Clock::now());
 
-            if (swapchain == nullptr)
+            if (*target == nullptr)
             {
                 // Minimized or occluded: not an error, but no frame was presented.
-                SDL_SubmitGPUCommandBuffer(cmd);
+                commands->submit();
                 SDL_Delay(kOccludedFrameDelayMs);
                 return RenderedFrame{.presented = false, .swapchain_wait_ms = swapchain_wait_ms};
             }
 
-            SDL_GPUColorTargetInfo target{};
-            target.texture = swapchain;
-            target.clear_color = clear_color();
-            target.load_op = SDL_GPU_LOADOP_CLEAR;
-            target.store_op = SDL_GPU_STOREOP_STORE;
-
-            SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &target, 1, nullptr);
-            if (pass == nullptr)
             {
-                STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_BeginGPURenderPass failed: {}", SDL_GetError());
-                // A swapchain texture was acquired, so cancel is illegal here.
-                SDL_SubmitGPUCommandBuffer(cmd);
-                return std::nullopt;
+                std::optional<render::RenderPass> pass = commands->begin_render_pass(*target, clear_color());
+                if (!pass)
+                {
+                    return std::nullopt;
+                }
+                draw_quad(*commands, *pass, quad, letterbox_scale(window.size_in_pixels()));
             }
-
-            SDL_BindGPUGraphicsPipeline(pass, quad.pipeline);
-
-            const SDL_GPUBufferBinding vb_binding{.buffer = quad.vertex_buffer, .offset = 0};
-            SDL_BindGPUVertexBuffers(pass, 0, &vb_binding, 1);
-
-            const SDL_GPUBufferBinding ib_binding{.buffer = quad.index_buffer, .offset = 0};
-            SDL_BindGPUIndexBuffer(pass, &ib_binding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
-
-            const SDL_GPUTextureSamplerBinding tex_binding{
-                .texture = quad.texture,
-                .sampler = quad.sampler,
-            };
-            SDL_BindGPUFragmentSamplers(pass, 0, &tex_binding, 1);
-
-            std::array<float, 2> scale{};
-            compute_letterbox_scale(window, scale);
-            SDL_PushGPUVertexUniformData(cmd, 0, scale.data(), sizeof(scale));
-
-            SDL_DrawGPUIndexedPrimitives(pass, kQuadIndexCount, 1, 0, 0, 0);
-
-            SDL_EndGPURenderPass(pass);
-            SDL_SubmitGPUCommandBuffer(cmd);
+            commands->submit();
             return RenderedFrame{.presented = true, .swapchain_wait_ms = swapchain_wait_ms};
         }
 
@@ -173,15 +148,16 @@ namespace stackide
         // ~10 frames, regardless of how long the process waits beforehand -- it is
         // tied to frame count, not wall-clock time). Polling drains the event queue,
         // so a quit seen here has to be reported or it is lost.
-        WarmupResult run_warmup_frames(SDL_GPUDevice* gpu, SDL_Window* window, const QuadResources& quad, int count)
+        WarmupResult run_warmup_frames(const render::Device& device, const render::Swapchain& swapchain,
+                                       const platform::Window& window, const QuadResources& quad, int count)
         {
             for (int i = 0; i < count; ++i)
             {
-                if (poll_quit_requested())
+                if (process_events(window))
                 {
                     return WarmupResult::QuitRequested;
                 }
-                if (!render_frame(gpu, window, quad))
+                if (!render_frame(device, swapchain, window, quad))
                 {
                     return WarmupResult::Failed;
                 }
@@ -214,8 +190,9 @@ namespace stackide
         // Runs the measured loop: presents frames until quit, --frames is reached,
         // or --timeout-ms elapses, tracking per-frame timing and dropped-frame
         // counts along the way.
-        FrameStats run_measured_loop(SDL_GPUDevice* gpu, SDL_Window* window, const QuadResources& quad,
-                                     const Options& opts, double expected_interval_ms)
+        FrameStats run_measured_loop(const render::Device& device, const render::Swapchain& swapchain,
+                                     platform::Window& window, const QuadResources& quad, const Options& opts,
+                                     double expected_interval_ms)
         {
             FrameStats stats;
             stats.frame_times_ms.reserve(opts.frames > 0 ? static_cast<std::size_t>(opts.frames)
@@ -229,12 +206,12 @@ namespace stackide
             {
                 const auto frame_start = Clock::now();
 
-                if (poll_quit_requested())
+                if (process_events(window))
                 {
                     break;
                 }
 
-                const std::optional<RenderedFrame> frame = render_frame(gpu, window, quad);
+                const std::optional<RenderedFrame> frame = render_frame(device, swapchain, window, quad);
                 if (!frame)
                 {
                     stats.exit_code = EXIT_FAILURE;
@@ -253,7 +230,7 @@ namespace stackide
 
                     if (opts.resize_after_frames > 0 && stats.presented == opts.resize_after_frames)
                     {
-                        SDL_SetWindowSize(window, opts.resize_width, opts.resize_height);
+                        window.set_size(opts.resize_width, opts.resize_height);
                     }
 
                     if (opts.frames > 0 && stats.presented >= opts.frames)
@@ -272,52 +249,6 @@ namespace stackide
             }
 
             return stats;
-        }
-
-        // Claims the swapchain's composition and present mode, printing its own
-        // error/skip diagnostics. Returns nullopt if this device doesn't support
-        // what's needed.
-        std::optional<SDL_GPUPresentMode> configure_swapchain(SDL_GPUDevice* gpu, SDL_Window* window,
-                                                              const Options& opts)
-        {
-            // SDR_LINEAR is required (decision 3), not a soft preference: never fall
-            // back to plain SDR composition if this device doesn't support it.
-            if (!SDL_WindowSupportsGPUSwapchainComposition(gpu, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR))
-            {
-                STACKIDE_LOG_ERROR(LogCategory::Render,
-                                   "SDR_LINEAR swapchain composition not supported on this device");
-                return std::nullopt;
-            }
-            const SDL_GPUPresentMode present_mode =
-                opts.present_mode == PresentMode::Immediate ? SDL_GPU_PRESENTMODE_IMMEDIATE : SDL_GPU_PRESENTMODE_VSYNC;
-            // VSYNC is guaranteed supported by every SDL_GPU backend; IMMEDIATE is not.
-            if (present_mode != SDL_GPU_PRESENTMODE_VSYNC &&
-                !SDL_WindowSupportsGPUPresentMode(gpu, window, present_mode))
-            {
-                STACKIDE_LOG_ERROR(LogCategory::Render, "immediate present mode not supported on this device");
-                return std::nullopt;
-            }
-            if (!SDL_SetGPUSwapchainParameters(gpu, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR, present_mode))
-            {
-                STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_SetGPUSwapchainParameters failed: {}", SDL_GetError());
-                return std::nullopt;
-            }
-            return present_mode;
-        }
-
-        // The live refresh rate, or 0.0F if the display or its current mode
-        // couldn't be queried.
-        float detect_refresh_hz(SDL_Window* window)
-        {
-            float refresh_hz = 0.0F;
-            if (const SDL_DisplayID display_id = SDL_GetDisplayForWindow(window); display_id != 0)
-            {
-                if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(display_id); mode != nullptr)
-                {
-                    refresh_hz = mode->refresh_rate;
-                }
-            }
-            return refresh_hz;
         }
 
         // Prints the exit-time summary and applies items 6/7's gates. Returns the
@@ -375,72 +306,81 @@ namespace stackide
             return exit_code;
         }
 
+        platform::VideoBackend to_video_backend(VideoDriver driver)
+        {
+            switch (driver)
+            {
+            case VideoDriver::Native:
+                return platform::VideoBackend::Native;
+            case VideoDriver::Wayland:
+                return platform::VideoBackend::Wayland;
+            case VideoDriver::X11:
+                return platform::VideoBackend::X11;
+            }
+            return platform::VideoBackend::Native;
+        }
+
+        int render_window(const Options& opts)
+        {
+            std::optional<platform::Window> window = platform::Window::create("stackide", kWindowWidth, kWindowHeight);
+            if (!window)
+            {
+                return EXIT_FAILURE;
+            }
+
+            const std::optional<render::Device> device = render::Device::create(opts.gpu_debug);
+            if (!device)
+            {
+                return render::gpu_unavailable_code(opts);
+            }
+
+            const std::optional<render::Swapchain> swapchain =
+                render::Swapchain::create(*device, *window, opts.present_mode);
+            if (!swapchain)
+            {
+                return render::gpu_unavailable_code(opts);
+            }
+
+            STACKIDE_LOG_INFO(LogCategory::Render, "swapchain format: {}", static_cast<int>(swapchain->format()));
+            const auto [width, height] = window->size_in_pixels();
+            STACKIDE_LOG_INFO(LogCategory::Platform, "window: {}x{} pixels, display scale {:.2f}", width, height,
+                              static_cast<double>(window->display_scale()));
+
+            const float refresh_hz = window->refresh_hz();
+            STACKIDE_LOG_INFO(LogCategory::Platform, "display refresh rate: {:.2f} Hz",
+                              static_cast<double>(refresh_hz));
+            const double expected_interval_ms = refresh_hz > 0.0F ? 1000.0 / static_cast<double>(refresh_hz) : 0.0;
+
+            const std::optional<QuadResources> quad = create_quad_resources(*device, swapchain->format());
+            if (!quad)
+            {
+                return render::gpu_unavailable_code(opts);
+            }
+
+            constexpr int kWarmupFrames = 20;
+            const WarmupResult warmup = run_warmup_frames(*device, *swapchain, *window, *quad, kWarmupFrames);
+            if (warmup == WarmupResult::Failed)
+            {
+                return EXIT_FAILURE;
+            }
+
+            const FrameStats stats = warmup == WarmupResult::QuitRequested
+                ? FrameStats{}
+                : run_measured_loop(*device, *swapchain, *window, *quad, opts, expected_interval_ms);
+            return report_and_gate(opts, stats, expected_interval_ms);
+        }
+
     } // namespace
 
     int run_windowed(const Options& opts)
     {
-        if (!SDL_Init(SDL_INIT_VIDEO))
+        const std::optional<platform::Video> video = platform::Video::start(to_video_backend(opts.video_driver));
+        if (!video)
         {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_Init failed: {}", SDL_GetError());
-            return EXIT_FAILURE;
+            return render::gpu_unavailable_code(opts);
         }
-        ScopeExit quit{[] { SDL_Quit(); }};
-
-        SDL_Window* window = SDL_CreateWindow("stackide", kWindowWidth, kWindowHeight, SDL_WINDOW_RESIZABLE);
-        if (window == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateWindow failed: {}", SDL_GetError());
-            return EXIT_FAILURE;
-        }
-        ScopeExit destroy_window{[window] { SDL_DestroyWindow(window); }};
-
-        SDL_GPUDevice* gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, opts.gpu_debug, nullptr);
-        if (gpu == nullptr)
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_CreateGPUDevice failed: {}", SDL_GetError());
-            return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
-        }
-        ScopeExit destroy_gpu{[gpu] { SDL_DestroyGPUDevice(gpu); }};
-
-        if (!SDL_ClaimWindowForGPUDevice(gpu, window))
-        {
-            STACKIDE_LOG_ERROR(LogCategory::Render, "SDL_ClaimWindowForGPUDevice failed: {}", SDL_GetError());
-            return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
-        }
-        ScopeExit release_window{[gpu, window] { SDL_ReleaseWindowFromGPUDevice(gpu, window); }};
-
-        const std::optional<SDL_GPUPresentMode> present_mode = configure_swapchain(gpu, window, opts);
-        if (!present_mode)
-        {
-            return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
-        }
-
-        STACKIDE_LOG_INFO(LogCategory::Render, "gpu driver: {}", SDL_GetGPUDeviceDriver(gpu));
-        const SDL_GPUTextureFormat swapchain_format = SDL_GetGPUSwapchainTextureFormat(gpu, window);
-        STACKIDE_LOG_INFO(LogCategory::Render, "swapchain format: {}", static_cast<int>(swapchain_format));
-
-        const float refresh_hz = detect_refresh_hz(window);
-        STACKIDE_LOG_INFO(LogCategory::Render, "display refresh rate: {:.2f} Hz", static_cast<double>(refresh_hz));
-        const double expected_interval_ms = refresh_hz > 0.0F ? 1000.0 / static_cast<double>(refresh_hz) : 0.0;
-
-        std::optional<QuadResources> quad = create_quad_resources(gpu, swapchain_format);
-        if (!quad)
-        {
-            return opts.allow_skip ? kExitSkip : EXIT_FAILURE;
-        }
-        ScopeExit destroy_quad{[gpu, res = *quad] { destroy_quad_resources(gpu, res); }};
-
-        constexpr int kWarmupFrames = 20;
-        const WarmupResult warmup = run_warmup_frames(gpu, window, *quad, kWarmupFrames);
-        if (warmup == WarmupResult::Failed)
-        {
-            return EXIT_FAILURE;
-        }
-
-        const FrameStats stats = warmup == WarmupResult::QuitRequested
-            ? FrameStats{}
-            : run_measured_loop(gpu, window, *quad, opts, expected_interval_ms);
-        return report_and_gate(opts, stats, expected_interval_ms);
+        STACKIDE_LOG_INFO(LogCategory::Platform, "video driver: {}", video->driver_name());
+        return render::apply_gpu_debug_result(opts, render_window(opts));
     }
 
 } // namespace stackide

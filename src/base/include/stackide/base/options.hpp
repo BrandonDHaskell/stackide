@@ -17,7 +17,14 @@ namespace stackide
     enum class PresentMode : std::uint8_t
     {
         Vsync,
+        Mailbox,
         Immediate,
+    };
+    enum class VideoDriver : std::uint8_t
+    {
+        Native,
+        Wayland,
+        X11,
     };
 
     struct Options
@@ -28,6 +35,8 @@ namespace stackide
         std::uint64_t timeout_ms = kDefaultTimeoutMs; // 0 disables the deadline
         bool allow_skip = false;
         bool gpu_debug = false;
+        bool require_validation = false; // requires gpu_debug
+        VideoDriver video_driver = VideoDriver::Native; // requires windowed mode
 
         // M1 item 6: requires windowed mode with --present-mode immediate.
         std::optional<double> assert_p99_under_ms;

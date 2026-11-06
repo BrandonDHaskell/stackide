@@ -6,7 +6,7 @@
 // Modes:
 //   (default)     windowed render loop, runs until quit
 //   --frames N    windowed, exits after N presented frames (N=0 means unbounded)
-//   --offscreen   no window; clears an owned texture, reads it back, asserts pixels
+//   --offscreen   no window; renders the quad to a texture, reads it back, asserts pixels
 //   --headless    no GPU device at all; init/teardown lifecycle only
 //
 // Exit codes:
@@ -14,15 +14,14 @@
 //   1   failure
 //   77  skipped (no GPU backend available, only with --allow-skip)
 
-#include <SDL3/SDL.h>
-
 #include <stackide/base/log.hpp>
 #include <stackide/base/options.hpp>
-#include <stackide/base/scope_exit.hpp>
+#include <stackide/platform/video.hpp>
 #include <stackide/render/modes.hpp>
 
 #include <cstdlib>
 #include <exception>
+#include <optional>
 #include <print>
 
 namespace stackide
@@ -36,17 +35,12 @@ namespace stackide
 
         int run_headless()
         {
-            // Override priority so SDL_VIDEODRIVER can't make this mode open a window.
-            SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE);
-
-            if (!SDL_Init(SDL_INIT_VIDEO))
+            const std::optional<platform::Video> video = platform::Video::start(platform::VideoBackend::Dummy);
+            if (!video)
             {
-                STACKIDE_LOG_ERROR(LogCategory::Platform, "SDL_Init failed: {}", SDL_GetError());
                 return EXIT_FAILURE;
             }
-            ScopeExit quit{[] { SDL_Quit(); }};
-
-            STACKIDE_LOG_INFO(LogCategory::Platform, "headless: video driver = {}", SDL_GetCurrentVideoDriver());
+            STACKIDE_LOG_INFO(LogCategory::Platform, "headless: video driver = {}", video->driver_name());
             return EXIT_SUCCESS;
         }
 
